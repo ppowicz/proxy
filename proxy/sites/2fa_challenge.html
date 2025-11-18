@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <title>Weryfikacja 2FA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        html, body { height: 100%; margin: 0; }
+        body {
+            display: flex; align-items: center; justify-content: center;
+            background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif;
+            transition: background-color 600ms ease, color 600ms ease;
+        }
+        body.success {
+            background: #4ade80; color: #000000;
+        }
+        .box { width: 320px; max-width: 90%; }
+        h1 { font-size: 48px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 300; margin: 0 0 12px 0; }
+        .subtitle { font-size: 13px; color: #999; margin: 0 0 20px 0; }
+        .code-inputs { display: flex; gap: 6px; justify-content: center; margin: 16px 0; }
+        .code-inputs input { width: 50px; padding: 12px 6px; text-align: center; font-size: 20px; letter-spacing: 2px; flex: 0 0 50px; background: #0b0b0d; border: 1px solid #222; color: #eee; border-radius: 6px; }
+        form { display: flex; flex-direction: column; gap: 12px; }
+        input { background: #0b0b0d; border: 1px solid #222; color: #eee; padding: 12px 14px; border-radius: 6px; font-size: 16px; }
+        input[type="submit"] { background: #1f1f1f; cursor: pointer; font-weight: 600; }
+        .error { color: #ff8080; font-size: 13px; text-align: center; margin-bottom: 12px; }
+        button { border: none; background: #1f1f1f; color: #f5f5f5; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; width: 100%; }
+        button:hover { background: #2a2a2c; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>Verify 2FA</h1>
+        <div class="error">{ERROR_MESSAGE}</div>
+        <form method="post">
+            <input type="hidden" name="next" value="{NEXT_URL}" />
+            <div class="code-inputs">
+                <input type="text" name="d1" maxlength="1" inputmode="numeric" autofocus />
+                <input type="text" name="d2" maxlength="1" inputmode="numeric" />
+                <input type="text" name="d3" maxlength="1" inputmode="numeric" />
+                <input type="text" name="d4" maxlength="1" inputmode="numeric" />
+                <input type="text" name="d5" maxlength="1" inputmode="numeric" />
+                <input type="text" name="d6" maxlength="1" inputmode="numeric" />
+            </div>
+            <input type="hidden" name="code" id="code" />
+            <button type="submit">Weryfikuj</button>
+            <script>
+                const digits = document.querySelectorAll('.code-inputs input');
+                const form = document.querySelector('form');
+                
+                // Clear digit inputs on page load
+                digits.forEach(d => d.value = '');
+                
+                // Update hidden code field
+                function updateCodeField() {
+                    document.getElementById('code').value = Array.from(digits).map(d => d.value).join('');
+                }
+                
+                digits.forEach((input, idx) => {
+                    input.addEventListener('input', (e) => {
+                        // Only accept numeric input
+                        e.target.value = e.target.value.replace(/[^0-9]/g, '');
+                        if (e.target.value && idx < digits.length - 1) digits[idx + 1].focus();
+                        updateCodeField();
+                    });
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Backspace' && !e.target.value && idx > 0) digits[idx - 1].focus();
+                    });
+                });
+                
+                // Ensure code is populated before form submission
+                form.addEventListener('submit', (e) => {
+                    updateCodeField();
+                    if (!document.getElementById('code').value || document.getElementById('code').value.length !== 6) {
+                        e.preventDefault();
+                        alert('Proszę wpisać 6-cyfrowy kod');
+                    } else {
+                        // Start success transition
+                        e.preventDefault();
+                        document.body.classList.add('success');
+                        
+                        // Wait 600ms for transition + 500ms buffer, then submit
+                        setTimeout(() => {
+                            form.submit();
+                        }, 1100);
+                    }
+                });
+            </script>
+        </form>
+    </div>
+</body>
+</html>

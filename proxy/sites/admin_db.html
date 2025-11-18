@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Baza danych</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        .section { padding: 16px; background: #0b0b0d; border-radius: 6px; margin-bottom: 16px; border: 1px solid #1a1a1d; }
+        .controls { margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .controls label { display: inline-flex; flex-direction: column; gap: 4px; font-size: 13px; color: #ddd; }
+        .controls select, .controls input[type="text"] { background: #151517; color: #fff; border: 1px solid #333; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+        button { background: #1f1f1f; color: #fff; border: 1px solid #333; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #2a2a2d; border-color: #555; }
+        button.secondary { background: transparent; border-color: #333; }
+        button.secondary:hover { background: #151517; }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table th { background: #151517; color: #fff; font-weight: 600; padding: 10px; text-align: left; border-bottom: 1px solid #222; }
+        table td { padding: 10px; border-bottom: 1px solid #222; color: #ddd; }
+        td[contenteditable="true"] { background: #1a1a1d; border-radius: 3px; padding: 8px; cursor: text; outline: 1px solid #333; }
+        td[contenteditable="true"]:focus { outline: 2px solid #555; }
+        .pagination { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 16px; font-size: 12px; }
+        .pagination button, .pagination span { padding: 6px 10px; border-radius: 4px; border: 1px solid #333; background: #151517; color: #fff; }
+        .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/">🏠 Strona główna</a>
+                <a href="/db" class="active">📊 Baza danych</a>
+                <a href="/logs">🔍 Ruch HTTP</a>
+                <a href="/users">👥 Użytkownicy</a>
+                <a href="/roles">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Baza danych</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <div class="controls">
+                    <label>Wybierz tabelę:
+                        <select id="db-table-select"></select>
+                    </label>
+                    <label id="db-search-label" style="display:none;">
+                        Szukaj:
+                        <input type="text" id="db-search" placeholder="Szukaj...">
+                    </label>
+                    <button id="db-clear-search" class="secondary" style="display:none;">Wyczyść</button>
+                </div>
+                <div id="db-table" class="table-wrapper"></div>
+                <div id="db-pagination" class="pagination"></div>
+            </section>
+        </main>
+    </div>
+    <script>
+    let dbTable = null;
+    let dbPage = 1;
+    const dbPageSize = 50;
+    let dbSearchValue = '';
+
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    async function loadTables() {
+        try {
+            const meta = await api('db/tables');
+            const select = document.getElementById('db-table-select');
+            select.innerHTML = '';
+            meta.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = t;
+                select.appendChild(opt);
+            });
+            select.onchange = () => {
+                dbTable = select.value;
+                dbPage = 1;
+                renderDbTable();
+            };
+            if (meta.length) {
+                dbTable = meta[0];
+                renderDbTable();
+            }
+        } catch (err) {
+            console.error('Failed to load tables', err);
+        }
+    }
+
+    async function renderDbTable() {
+        if (!dbTable) return;
+        try {
+            const data = await api(`db/${dbTable}?limit=10000`);
+            const wrapper = document.getElementById('db-table');
+            wrapper.innerHTML = '';
+            const searchLabel = document.getElementById('db-search-label');
+            const clearBtn = document.getElementById('db-clear-search');
+            if (data.rows && data.rows.length > 0) {
+                searchLabel.style.display = 'inline-flex';
+                clearBtn.style.display = 'inline-block';
+            } else {
+                searchLabel.style.display = 'none';
+                clearBtn.style.display = 'none';
+            }
+            let rows = data.rows || [];
+            const cols = data.columns || [];
+            if (dbSearchValue) {
+                const needle = dbSearchValue.toLowerCase();
+                rows = rows.filter(row => cols.some(col => String(row[col] ?? '').toLowerCase().includes(needle)));
+            }
+            const totalRows = rows.length;
+            const totalPages = Math.max(1, Math.ceil(totalRows / dbPageSize));
+            dbPage = Math.min(dbPage, totalPages);
+            const start = (dbPage - 1) * dbPageSize;
+            const pageRows = rows.slice(start, start + dbPageSize);
+
+            const tbl = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            cols.forEach(c => {
+                const th = document.createElement('th');
+                th.textContent = c;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            tbl.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            pageRows.forEach(row => {
+                const tr = document.createElement('tr');
+                cols.forEach(col => {
+                    const td = document.createElement('td');
+                    td.contentEditable = true;
+                    const val = row[col];
+                    td.textContent = val === null ? '' : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+                    td.dataset.pk = row[cols[0]];
+                    td.dataset.col = col;
+                    td.dataset.table = dbTable;
+                    td.addEventListener('blur', handleCellEdit);
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            tbl.appendChild(tbody);
+            wrapper.appendChild(tbl);
+
+            renderDbPagination(totalPages, totalRows);
+        } catch (err) {
+            console.error('Error loading table', err);
+        }
+    }
+
+    function handleCellEdit(ev) {
+        const val = ev.target.textContent;
+        const pkName = ev.target.closest('table').querySelector('th').textContent;
+        const pkValue = ev.target.dataset.pk;
+        const column = ev.target.dataset.col;
+        const table = ev.target.dataset.table;
+        updateCell(table, pkName, pkValue, column, val);
+    }
+
+    async function updateCell(table, pkName, pkValue, column, value) {
+        try {
+            await fetch(`/api/db/${table}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ pk_name: pkName, pk_value: pkValue, column, value })
+            });
+        } catch (err) {
+            console.error('Update failed', err);
+        }
+    }
+
+    function renderDbPagination(totalPages, totalRows) {
+        const pag = document.getElementById('db-pagination');
+        pag.innerHTML = '';
+        if (totalPages <= 1) return;
+        const prev = document.createElement('button');
+        prev.textContent = '← Poprzednia';
+        prev.disabled = dbPage <= 1;
+        prev.onclick = () => { dbPage--; renderDbTable(); };
+        pag.appendChild(prev);
+        const label = document.createElement('span');
+        label.textContent = `Strona ${dbPage} / ${totalPages} (${totalRows} rekordów)`;
+        pag.appendChild(label);
+        const next = document.createElement('button');
+        next.textContent = 'Następna →';
+        next.disabled = dbPage >= totalPages;
+        next.onclick = () => { dbPage++; renderDbTable(); };
+        pag.appendChild(next);
+    }
+
+    document.getElementById('db-search').addEventListener('input', (ev) => {
+        dbSearchValue = ev.target.value;
+        dbPage = 1;
+        renderDbTable();
+    });
+
+    document.getElementById('db-clear-search').addEventListener('click', () => {
+        dbSearchValue = '';
+        const input = document.getElementById('db-search');
+        input.value = '';
+        dbPage = 1;
+        renderDbTable();
+    });
+
+    loadTables();
+    </script>
+</body>
+</html>

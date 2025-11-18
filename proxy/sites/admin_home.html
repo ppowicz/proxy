@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Strona główna</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; flex-direction: row; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; overflow-y: auto; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; cursor: pointer; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        h2 { font-size: 18px; font-weight: 400; margin: 0 0 16px; color: #fff; }
+    .section { padding: 16px; background: #0b0b0d; border-radius: 6px; margin-bottom: 16px; border: 1px solid #1a1a1d; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .metric-card { background: #0f0f11; border: 1px solid #222; border-radius: 6px; padding: 12px; }
+    .metric-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
+    .metric-value { font-size: 20px; font-weight: 500; color: #fff; }
+    .meter { width: 100%; height: 8px; border-radius: 999px; background: #1c1c1f; overflow: hidden; margin: 8px 0; }
+    .meter-bar { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #6366f1); width: 0%; transition: width 0.3s ease; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .status-chip { padding: 10px 12px; border-radius: 6px; background: #141418; border: 1px solid #21212a; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+    .status-chip.ok { border-color: #22c55e44; color: #4ade80; }
+    .status-chip.bad { border-color: #f87171aa; color: #f87171; }
+    .requests-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .request-card { padding: 12px; background: #0f0f11; border: 1px solid #222; border-radius: 6px; }
+    .request-card span { display: block; }
+    .request-label { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.05em; }
+    .request-value { font-size: 22px; font-weight: 600; color: #fff; }
+        .project { padding: 12px; background: #0f0f11; border-left: 3px solid #333; margin-bottom: 8px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; }
+        .project strong { color: #fff; }
+        .project .status { font-size: 12px; color: #888; }
+        .project .status.ok { color: #4ade80; }
+        .project .status.error { color: #f87171; }
+        .project .status.down { color: #ef4444; }
+        .projects-empty { color: #777; font-size: 14px; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/" class="active">🏠 Strona główna</a>
+                <a href="/db">📊 Baza danych</a>
+                <a href="/logs">🔍 Ruch HTTP</a>
+                <a href="/users">👥 Użytkownicy</a>
+                <a href="/roles">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Panel administracyjny</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <h2>⚡ Kondycja systemu</h2>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-title">CPU</div>
+                        <div class="meter"><div class="meter-bar" id="cpu-bar"></div></div>
+                        <div class="metric-value" id="cpu-label">--</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">RAM</div>
+                        <div class="meter"><div class="meter-bar" id="ram-bar"></div></div>
+                        <div class="metric-value" id="ram-label">--</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Dysk</div>
+                        <div class="meter"><div class="meter-bar" id="disk-bar"></div></div>
+                        <div class="metric-value" id="disk-label">--</div>
+                    </div>
+                </div>
+                <div class="status-grid">
+                    <div class="status-chip" id="db-status"><span>DB</span><strong>--</strong></div>
+                    <div class="status-chip" id="proxy-status"><span>Proxy</span><strong>--</strong></div>
+                    <div class="status-chip" id="projects-status"><span>Projekty</span><strong>--</strong></div>
+                    <div class="status-chip" id="threads-status"><span>Wątki</span><strong>--</strong></div>
+                </div>
+                <div class="requests-grid">
+                    <div class="request-card">
+                        <span class="request-label">Żądania / h</span>
+                        <span class="request-value" id="req-hour">--</span>
+                    </div>
+                    <div class="request-card">
+                        <span class="request-label">Żądania / min</span>
+                        <span class="request-value" id="req-minute">--</span>
+                    </div>
+                    <div class="request-card">
+                        <span class="request-label">Błędy</span>
+                        <span class="request-value" id="req-error">--</span>
+                    </div>
+                    <div class="request-card">
+                        <span class="request-label">Śr. backend</span>
+                        <span class="request-value" id="req-latency">--</span>
+                    </div>
+                </div>
+            </section>
+            <section class="section">
+                <h2>📊 Stan projektów</h2>
+                <div id="projects-summary"></div>
+            </section>
+        </main>
+    </div>
+    <script>
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes && bytes !== 0) return '--';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let value = bytes;
+        let idx = 0;
+        while (value >= 1024 && idx < units.length - 1) {
+            value /= 1024;
+            idx++;
+        }
+        return value.toFixed(idx === 0 ? 0 : 1) + ' ' + units[idx];
+    }
+
+    function formatKbToGb(kb) {
+        if (!kb && kb !== 0) return '--';
+        return (kb / (1024 * 1024)).toFixed(1) + ' GB';
+    }
+
+    function updateMeter(id, percent) {
+        const bar = document.getElementById(id);
+        if (!bar) return;
+        const clamped = Math.max(0, Math.min(100, percent || 0));
+        bar.style.width = clamped + '%';
+        if (clamped > 85) {
+            bar.style.background = 'linear-gradient(90deg, #f97316, #ef4444)';
+        } else if (clamped > 65) {
+            bar.style.background = 'linear-gradient(90deg, #facc15, #f97316)';
+        } else {
+            bar.style.background = 'linear-gradient(90deg, #22d3ee, #6366f1)';
+        }
+    }
+
+    function updateStatus(id, ok, label) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('ok', 'bad');
+        el.classList.add(ok ? 'ok' : 'bad');
+        el.querySelector('strong').textContent = label;
+    }
+
+    async function loadDashboard() {
+        try {
+            const data = await api('dashboard/metrics');
+            const system = data.system || {};
+            const services = data.services || {};
+            const requests = data.requests || {};
+
+            updateMeter('cpu-bar', system.cpu_percent || 0);
+            document.getElementById('cpu-label').textContent = system.cpu_percent != null ? system.cpu_percent.toFixed(1) + '%' : '--';
+
+            updateMeter('ram-bar', system.memory_percent || 0);
+            const memUsed = system.memory_used_kb;
+            const memTotal = system.memory_total_kb;
+            document.getElementById('ram-label').textContent = (memUsed != null && memTotal) ? `${formatKbToGb(memUsed)} / ${formatKbToGb(memTotal)}` : '--';
+
+            const diskPercent = system.disk_percent || 0;
+            updateMeter('disk-bar', diskPercent);
+            document.getElementById('disk-label').textContent = (system.disk_used_bytes != null && system.disk_total_bytes) ? `${formatBytes(system.disk_used_bytes)} / ${formatBytes(system.disk_total_bytes)}` : '--';
+
+            updateStatus('db-status', !!services.db, services.db ? 'OK' : 'Offline');
+            updateStatus('proxy-status', true, `${Math.floor((system.uptime_seconds || 0) / 3600)}h uptime`);
+            const projectsLoaded = services.projects_loaded || 0;
+            const projectsBroken = services.projects_broken || 0;
+            const projectsTotal = projectsLoaded + projectsBroken;
+            const projectsText = `${projectsLoaded} / ${projectsTotal || projectsLoaded}`;
+            updateStatus('projects-status', projectsBroken === 0, projectsText);
+            updateStatus('threads-status', true, `${services.threads || 0}`);
+
+            document.getElementById('req-hour').textContent = requests.per_hour != null ? requests.per_hour : '--';
+            document.getElementById('req-minute').textContent = requests.per_minute != null ? requests.per_minute.toFixed(2) : '--';
+            document.getElementById('req-error').textContent = (requests.error_rate != null ? (requests.error_rate * 100).toFixed(2) + '%' : '--');
+            document.getElementById('req-latency').textContent = requests.avg_backend_ms != null ? Math.round(requests.avg_backend_ms) + ' ms' : '--';
+        } catch (err) {
+            console.error('Failed to load dashboard metrics', err);
+        }
+    }
+
+    async function loadProjects() {
+        try {
+            const data = await api('projects/status');
+            const container = document.getElementById('projects-summary');
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p class="projects-empty">Brak projektów</p>';
+                return;
+            }
+            data.forEach(p => {
+                const statusClass = p.status || 'down';
+                const el = document.createElement('div');
+                el.className = 'project';
+                el.innerHTML = `<span><strong>${p.subdomain}</strong></span><span class="status ${statusClass}">${p.status} — ${p.response_time_ms ?? '-'} ms</span>`;
+                container.appendChild(el);
+            });
+        } catch (err) {
+            console.error('Failed to load project status', err);
+        }
+    }
+
+    loadDashboard();
+    loadProjects();
+    setInterval(loadDashboard, 2000);
+    setInterval(loadProjects, 5000);
+    </script>
+</body>
+</html>

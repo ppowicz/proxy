@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Role i uprawnienia</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        .section { padding: 16px; background: #0b0b0d; border-radius: 6px; margin-bottom: 16px; border: 1px solid #1a1a1d; }
+        .role-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        button { background: #1f1f1f; color: #fff; border: 1px solid #333; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #2a2a2d; border-color: #555; }
+        button.secondary { background: transparent; border-color: #333; }
+        button.secondary:hover { background: #151517; }
+        .role-item { padding: 16px; background: #0f0f11; border: 1px solid #1a1a1d; border-radius: 6px; margin-bottom: 12px; }
+        .role-item-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .role-name { font-size: 16px; font-weight: 600; color: #fff; }
+        .role-description { font-size: 12px; color: #888; margin-top: 4px; }
+        .role-perms { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .perm-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: #1a1a1d; border-radius: 3px; font-size: 12px; color: #aaa; }
+        .perm-tag input { cursor: pointer; }
+        .empty { color: #777; font-size: 13px; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/">🏠 Strona główna</a>
+                <a href="/db">📊 Baza danych</a>
+                <a href="/logs">🔍 Ruch HTTP</a>
+                <a href="/users">👥 Użytkownicy</a>
+                <a href="/roles" class="active">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Role i uprawnienia</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <div class="role-actions">
+                    <button id="btn-new-role" type="button">+ Nowa rola</button>
+                    <button id="btn-new-perm" type="button" class="secondary">+ Nowe uprawnienie</button>
+                </div>
+                <div id="roles-list"></div>
+            </section>
+        </main>
+    </div>
+    <script>
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    async function loadRoles() {
+        try {
+            const [roles, perms] = await Promise.all([
+                api('roles'),
+                api('permissions')
+            ]);
+            const rolePerms = await Promise.all(roles.map(role => api(`roles/${role.id}/permissions`).catch(() => [])));
+            const permsByRole = new Map();
+            roles.forEach((role, index) => {
+                permsByRole.set(role.id, rolePerms[index] || []);
+            });
+            const wrapper = document.getElementById('roles-list');
+            wrapper.innerHTML = '';
+            if (!roles.length) {
+                wrapper.innerHTML = '<p class="empty">Brak zdefiniowanych ról.</p>';
+                return;
+            }
+            roles.forEach(role => {
+                const div = document.createElement('div');
+                div.className = 'role-item';
+                const header = document.createElement('div');
+                header.className = 'role-item-header';
+                header.innerHTML = `
+                    <div>
+                        <div class="role-name">${role.name}</div>
+                        <div class="role-description">${role.description || '—'}</div>
+                    </div>
+                    <button class="secondary" disabled title="Edytor nazw w przygotowaniu">Edytuj</button>`;
+                div.appendChild(header);
+                const permsDiv = document.createElement('div');
+                permsDiv.className = 'role-perms';
+                const assigned = permsByRole.get(role.id) || [];
+                perms.forEach(perm => {
+                    const label = document.createElement('label');
+                    label.className = 'perm-tag';
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.value = perm.id;
+                    input.checked = assigned.some(p => p.id === perm.id);
+                    input.dataset.roleId = role.id;
+                    input.onchange = () => updateRolePermission(role.id, input);
+                    label.appendChild(input);
+                    label.appendChild(document.createTextNode(perm.code));
+                    permsDiv.appendChild(label);
+                });
+                if (!perms.length) {
+                    permsDiv.innerHTML = '<span class="empty">Brak zdefiniowanych uprawnień.</span>';
+                }
+                div.appendChild(permsDiv);
+                wrapper.appendChild(div);
+            });
+        } catch (err) {
+            console.error('Failed to load roles', err);
+        }
+    }
+
+    async function updateRolePermission(roleId, checkbox) {
+        try {
+            const action = checkbox.checked ? 'assign' : 'deassign';
+            await api(`roles/${roleId}/permissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, permission_id: parseInt(checkbox.value, 10) })
+            });
+        } catch (err) {
+            console.error('Failed to update permission', err);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
+    async function createRole() {
+        const name = prompt('Nazwa roli:');
+        if (!name || !name.trim()) return;
+        const description = prompt('Opis (opcjonalnie):') || '';
+        try {
+            await api('roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim(), description })
+            });
+            loadRoles();
+        } catch (err) {
+            console.error('Failed to create role', err);
+            alert('Nie udało się utworzyć roli.');
+        }
+    }
+
+    async function createPermission() {
+        const code = prompt('Kod uprawnienia (np. user.read):');
+        if (!code || !code.trim()) return;
+        const description = prompt('Opis (opcjonalnie):') || '';
+        try {
+            await api('permissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: code.trim(), description })
+            });
+            loadRoles();
+        } catch (err) {
+            console.error('Failed to create permission', err);
+            alert('Nie udało się utworzyć uprawnienia.');
+        }
+    }
+
+    document.getElementById('btn-new-role').addEventListener('click', createRole);
+    document.getElementById('btn-new-perm').addEventListener('click', createPermission);
+
+    loadRoles();
+    </script>
+</body>
+</html>

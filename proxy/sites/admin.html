@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Panel administracyjny</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { 
+            height: 100%; 
+            margin: 0; 
+            padding: 0;
+        }
+        body {
+            background: #050508; 
+            color: #f5f5f5; 
+            font-family: 'Roboto', sans-serif;
+        }
+        .admin-shell {
+            display: flex; 
+            height: 100vh;
+            flex-direction: row;
+        }
+        .sidebar {
+            width: 220px;
+            background: #0b0b0d;
+            padding: 20px;
+            border-right: 1px solid #1a1a1d;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .sidebar .logo {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            color: #fff;
+            text-align: center;
+        }
+        .sidebar nav {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .sidebar nav a {
+            display: block;
+            color: #aaa;
+            text-decoration: none;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 0;
+            font-size: 14px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .sidebar nav a:hover {
+            color: #fff;
+            background: #151517;
+        }
+        .sidebar nav a.active {
+            background: #1f1f1f;
+            color: #fff;
+            font-weight: 600;
+        }
+        .main {
+            flex: 1;
+            padding: 24px;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #1a1a1d;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }
+        .meta {
+            font-size: 12px;
+            color: #888;
+        }
+        .tabs {
+            display: none;
+        }
+        .tabs.active {
+            display: block;
+        }
+        h2 {
+            font-size: 18px;
+            font-weight: 400;
+            margin-top: 0;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+        .section {
+            padding: 16px;
+            background: #0b0b0d;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            border: 1px solid #1a1a1d;
+        }
+        .table-wrapper {
+            overflow-x: auto;
+        }
+        .logs-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #111113;
+            border: 1px solid #1c1c1f;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            transition: opacity 0.2s ease;
+        }
+        .logs-actions.hidden {
+            opacity: 0;
+            pointer-events: none;
+            height: 0;
+            padding: 0 16px;
+            border-width: 0;
+            margin-bottom: 0;
+        }
+        .logs-actions .actions-left {
+            font-size: 13px;
+            color: #ddd;
+        }
+        .logs-actions .actions-right {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .logs-actions button.danger {
+            background: #7f1d1d;
+            border-color: #b91c1c;
+        }
+        .logs-actions button.danger:hover {
+            background: #991b1b;
+        }
+        .logs-actions button.outline {
+            background: transparent;
+            border-color: #333;
+        }
+        .logs-actions button.outline:hover {
+            background: #1a1a1d;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        table th {
+            background: #151517;
+            color: #fff;
+            font-weight: 600;
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #222;
+        }
+        table td {
+            padding: 10px;
+            border-bottom: 1px solid #222;
+            color: #ddd;
+        }
+        table th:first-child,
+        table td:first-child {
+            width: 32px;
+            text-align: center;
+        }
+        table tr:hover {
+            background: #151517;
+        }
+        td[contenteditable="true"] {
+            background: #1a1a1d;
+            border-radius: 3px;
+            padding: 8px;
+            cursor: text;
+            outline: 1px solid #333;
+        }
+        td[contenteditable="true"]:focus {
+            outline: 2px solid #555;
+        }
+        .project {
+            padding: 12px;
+            background: #0f0f11;
+            border-left: 3px solid #333;
+            margin-bottom: 8px;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .project strong {
+            color: #fff;
+        }
+        .project .status {
+            font-size: 12px;
+            color: #888;
+        }
+        .project .status.ok {
+            color: #4ade80;
+        }
+        .project .status.error {
+            color: #f87171;
+        }
+        .project .status.down {
+            color: #ef4444;
+        }
+        .controls {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .controls label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .controls select,
+        .controls input[type="text"] {
+            background: #151517;
+            color: #fff;
+            border: 1px solid #333;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .controls input[type="text"] {
+            cursor: text;
+            min-width: 200px;
+        }
+        .controls select option {
+            background: #0b0b0d;
+            color: #fff;
+        }
+        button {
+            background: #1f1f1f;
+            color: #fff;
+            border: 1px solid #333;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #2a2a2d;
+            border-color: #555;
+        }
+        button.secondary {
+            background: transparent;
+            border-color: #333;
+        }
+        button.secondary:hover {
+            background: #151517;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .stat-box {
+            background: #151517;
+            padding: 16px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #222;
+        }
+        .stat-number {
+            font-size: 32px;
+            font-weight: 700;
+            color: #fff;
+            margin: 0;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 8px;
+        }
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+        }
+        .chart-panel,
+        .list-panel {
+            background: #0f0f11;
+            border: 1px solid #1a1a1d;
+            border-radius: 6px;
+            padding: 16px;
+        }
+        .panel-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #aaa;
+            margin-bottom: 12px;
+        }
+        #logs-timeline-chart {
+            width: 100%;
+            height: 220px;
+            display: block;
+        }
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #1c1c1f;
+            font-size: 13px;
+        }
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        .list-item strong {
+            color: #fff;
+        }
+        .list-meta {
+            color: #888;
+            font-size: 11px;
+        }
+        .chip {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            margin-left: 6px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .chip.error { color: #f87171; border-color: rgba(248,113,113,0.4); }
+        .chip.latency { color: #60a5fa; border-color: rgba(96,165,250,0.4); }
+        .chip.total { color: #a5b4fc; border-color: rgba(165,180,252,0.4); }
+        .status-bars {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+        .status-bar {
+            padding: 12px;
+            background: #111113;
+            border: 1px solid #1d1d20;
+            border-radius: 6px;
+        }
+        .status-bar strong {
+            display: block;
+            font-size: 12px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #ccc;
+            margin-bottom: 6px;
+        }
+        .status-bar .bar-track {
+            width: 100%;
+            height: 6px;
+            background: #1f1f23;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .status-bar .bar-fill {
+            height: 100%;
+            border-radius: 999px;
+        }
+        .status-ok { background: linear-gradient(90deg, #15803d, #4ade80); }
+        .status-redirect { background: linear-gradient(90deg, #a16207, #facc15); }
+        .status-client { background: linear-gradient(90deg, #b45309, #f97316); }
+        .status-server { background: linear-gradient(90deg, #b91c1c, #f87171); }
+        .status-error { background: linear-gradient(90deg, #9d174d, #ec4899); }
+        .muted {
+            color: #777;
+            font-size: 11px;
+        }
+        .errors-list .list-item {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .errors-list code {
+            display: inline-block;
+            margin-top: 4px;
+            font-size: 12px;
+            background: #111113;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .pagination {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+            margin-top: 16px;
+            font-size: 12px;
+        }
+        .pagination button,
+        .pagination span {
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #333;
+            background: #151517;
+            color: #fff;
+            cursor: pointer;
+        }
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .pagination button:hover:not(:disabled) {
+            background: #1f1f1f;
+        }
+        .user-item {
+            padding: 12px;
+            background: #0f0f11;
+            border: 1px solid #1a1a1d;
+            border-radius: 4px;
+            margin-bottom: 12px;
+        }
+        .user-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .user-name {
+            font-weight: 600;
+            color: #fff;
+        }
+        .user-email {
+            font-size: 12px;
+            color: #888;
+            margin: 0;
+        }
+        .user-status {
+            display: inline-block;
+            font-size: 11px;
+            margin-top: 4px;
+            padding: 2px 10px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .status-active {
+            background: #12321f;
+            color: #4ade80;
+        }
+        .status-inactive {
+            background: #3a1c1c;
+            color: #ff8080;
+        }
+        .user-roles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .role-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            background: #1a1a1d;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .role-tag input[type="checkbox"] {
+            cursor: pointer;
+        }
+        .role-management {
+            margin-top: 16px;
+            padding: 16px;
+            background: #151517;
+            border-radius: 4px;
+        }
+        .role-list {
+            margin-top: 12px;
+        }
+        .role-item {
+            padding: 12px;
+            background: #0f0f11;
+            border: 1px solid #1a1a1d;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+        .role-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .role-name {
+            font-weight: 600;
+            color: #fff;
+        }
+        .role-description {
+            font-size: 12px;
+            color: #888;
+        }
+        .role-perms {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 8px;
+        }
+        .perm-tag {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #1a1a1d;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .backend-indicator {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .backend-indicator.ok {
+            background: #1a3a2a;
+            color: #4ade80;
+        }
+        .backend-indicator.error {
+            background: #3a1a1a;
+            color: #f87171;
+        }
+        .client-indicator {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .client-indicator.success {
+            background: #1a3a2a;
+            color: #4ade80;
+        }
+        .client-indicator.redirect {
+            background: #3a3a1a;
+            color: #facc15;
+        }
+        .client-indicator.error {
+            background: #3a1a1a;
+            color: #f87171;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="#" data-tab="home" class="tab-link active">🏠 Strona główna</a>
+                <a href="#" data-tab="db" class="tab-link">📊 Baza danych</a>
+                <a href="#" data-tab="logs" class="tab-link">🔍 Ruch HTTP</a>
+                <a href="#" data-tab="users" class="tab-link">👥 Użytkownicy</a>
+                <a href="#" data-tab="roles" class="tab-link">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <header>
+                <div>
+                    <h1>Panel administracyjny</h1>
+                </div>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+
+            <!-- Tab: Strona główna -->
+            <div id="tab-home" class="tabs active">
+                <h2>📊 Stan projektów</h2>
+                <div class="section table-wrapper">
+                    <div id="projects-summary"></div>
+                </div>
+            </div>
+
+            <!-- Tab: Baza danych -->
+            <div id="tab-db" class="tabs">
+                <h2>📊 Baza danych</h2>
+                <div class="section">
+                    <div class="controls">
+                        <label>Tabela:<br>
+                            <select id="db-table-select"></select>
+                        </label>
+                        <input type="text" id="db-search" placeholder="Szukaj..." style="display:none;">
+                        <button id="db-clear-search" class="secondary" style="display:none;">Wyczyść</button>
+                    </div>
+                </div>
+                <div id="db-table" class="section table-wrapper"></div>
+                <div id="db-pagination" class="pagination"></div>
+            </div>
+
+            <!-- Tab: Ruch HTTP -->
+            <div id="tab-logs" class="tabs">
+                <h2>🔍 Ruch HTTP</h2>
+                <div class="section">
+                    <div class="controls">
+                        <label>Zakres czasu:<br>
+                            <select id="logs-window">
+                                <option value="60">Ostatnia godzina</option>
+                                <option value="360">Ostatnie 6 godzin</option>
+                                <option value="1440" selected>Ostatnie 24 godziny</option>
+                                <option value="10080">Ostatnie 7 dni</option>
+                            </select>
+                        </label>
+                        <label>Filtruj:<br>
+                            <select id="logs-filter">
+                                <option value="">Wszystkie żądania</option>
+                                <option value="2xx">2xx (OK)</option>
+                                <option value="3xx">3xx (Redirect)</option>
+                                <option value="4xx">4xx (Client Error)</option>
+                                <option value="5xx">5xx (Server Error)</option>
+                                <option value="error">Błędy</option>
+                            </select>
+                        </label>
+                        <input type="text" id="logs-search" placeholder="Szukaj po Path/IP...">
+                        <button id="logs-clear-search" class="secondary">Wyczyść</button>
+                    </div>
+                </div>
+                <div class="section">
+                    <div id="logs-stats" class="stats"></div>
+                    <div id="logs-status-bars" class="status-bars"></div>
+                </div>
+                <div class="section analytics-grid">
+                    <div class="chart-panel">
+                        <div class="panel-title">Trendy ruchu</div>
+                        <canvas id="logs-timeline-chart"></canvas>
+                    </div>
+                    <div class="list-panel">
+                        <div class="panel-title">Top subdomeny</div>
+                        <div id="logs-top-subdomains"></div>
+                    </div>
+                </div>
+                <div class="section analytics-grid">
+                    <div class="list-panel">
+                        <div class="panel-title">Popularne ścieżki</div>
+                        <div id="logs-top-paths"></div>
+                    </div>
+                    <div class="list-panel">
+                        <div class="panel-title">Ostatnie błędy</div>
+                        <div id="logs-recent-errors" class="errors-list"></div>
+                    </div>
+                </div>
+                <div class="section">
+                    <div id="logs-actions-bar" class="logs-actions hidden">
+                        <div class="actions-left">
+                            Wybrano <strong id="logs-selected-count">0</strong> logów
+                        </div>
+                        <div class="actions-right">
+                            <button id="logs-btn-delete" class="danger" type="button">Usuń zaznaczone</button>
+                            <button id="logs-btn-export" class="outline" type="button">Eksportuj JSON</button>
+                        </div>
+                    </div>
+                    <div id="logs-table" class="table-wrapper"></div>
+                </div>
+                <div id="logs-pagination" class="pagination"></div>
+            </div>
+
+            <!-- Tab: Użytkownicy -->
+            <div id="tab-users" class="tabs">
+                <h2>👥 Użytkownicy</h2>
+                <div id="users-list" class="section"></div>
+            </div>
+
+            <!-- Tab: Role & Uprawnienia -->
+            <div id="tab-roles" class="tabs">
+                <h2>🔐 Role i uprawnienia</h2>
+                <div class="section role-management">
+                    <button id="btn-new-role" type="button" onclick="__createRole(event)">+ Nowa rola</button>
+                    <button id="btn-new-perm" type="button" onclick="__createPerm(event)">+ Nowe uprawnienie</button>
+                    <div class="role-list" id="roles-list"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    // Simple admin SPA: loads via /api/* endpoints
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({credentials: 'include'}, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    // Pagination state
+    let dbPage = 1, dbPageSize = 50, dbTable = null;
+    let logsPage = 1, logsPageSize = 50, logsFilter = '', logsSearch = '', logsWindow = 1440;
+    let logsTimelineData = [];
+    let timelineHoverIndex = null;
+    const timelinePadding = { top: 20, right: 20, bottom: 40, left: 50 };
+    const logSelections = new Set();
+    const logDataById = new Map();
+
+    // Tab switching
+    document.querySelectorAll('.tab-link').forEach(a => a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        document.querySelectorAll('.tab-link').forEach(x => x.classList.remove('active'));
+        a.classList.add('active');
+        const tab = a.getAttribute('data-tab');
+        document.querySelectorAll('.tabs').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + tab).classList.add('active');
+        if (tab === 'db') loadTables();
+        if (tab === 'logs') {
+            loadLogs();
+            loadLogAnalytics();
+        }
+        if (tab === 'users') loadUsers();
+        if (tab === 'roles') loadRoles();
+        if (tab === 'home') loadProjects();
+    }));
+
+    // ========== HOME TAB ==========
+    async function loadProjects(){
+        try{
+            const data = await api('projects/status');
+            const container = document.getElementById('projects-summary');
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p style="color:#888;">Brak projektów</p>';
+                return;
+            }
+            data.forEach(p => {
+                const statusClass = p.status || 'down';
+                const el = document.createElement('div'); 
+                el.className = 'project';
+                el.innerHTML = `<span><strong>${p.subdomain}</strong></span><span class="status ${statusClass}">${p.status} — ${p.response_time_ms ?? '-'} ms</span>`;
+                container.appendChild(el);
+            });
+        }catch(e){ console.error(e); }
+    }
+    setInterval(loadProjects, 5000); 
+    loadProjects();
+
+    // ========== DB TAB ==========
+    async function loadTables(){
+        try{
+            const meta = await api('db/tables');
+            const select = document.getElementById('db-table-select');
+            select.innerHTML='';
+            meta.forEach(t => {
+                const opt = document.createElement('option'); 
+                opt.value = t; 
+                opt.textContent = t; 
+                select.appendChild(opt);
+            });
+            select.onchange = () => {
+                dbTable = select.value;
+                dbPage = 1;
+                renderDbTable();
+            };
+            if(meta.length) {
+                dbTable = meta[0];
+                renderDbTable();
+            }
+        }catch(e){ console.error(e); }
+    }
+
+    async function renderDbTable(){
+        if (!dbTable) return;
+        try{
+            const data = await api(`db/${dbTable}?limit=10000`);
+            const wrapper = document.getElementById('db-table');
+            wrapper.innerHTML = '';
+            
+            let rows = data.rows || [];
+            const cols = data.columns || [];
+            
+            // Pagination
+            const totalRows = rows.length;
+            const totalPages = Math.ceil(totalRows / dbPageSize);
+            const start = (dbPage - 1) * dbPageSize;
+            const end = start + dbPageSize;
+            const pageRows = rows.slice(start, end);
+            
+            const tbl = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            cols.forEach(c => { 
+                const th = document.createElement('th'); 
+                th.textContent = c; 
+                tr.appendChild(th); 
+            });
+            thead.appendChild(tr); 
+            tbl.appendChild(thead);
+            
+            const tbody = document.createElement('tbody');
+            pageRows.forEach(row => {
+                const tr = document.createElement('tr');
+                cols.forEach(col => {
+                    const td = document.createElement('td'); 
+                    td.contentEditable = true;
+                    const val = row[col];
+                    td.textContent = val === null ? '' : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+                    td.dataset.pk = row[cols[0]];
+                    td.dataset.col = col;
+                    td.dataset.table = dbTable;
+                    td.addEventListener('blur', async (ev) => {
+                        const val = ev.target.textContent;
+                        const pk_name = cols[0];
+                        const pk_value = ev.target.dataset.pk;
+                        const column = ev.target.dataset.col;
+                        const table = ev.target.dataset.table;
+                        try{
+                            await fetch('/api/db/' + table + '/update', {
+                                method:'POST', 
+                                headers:{'Content-Type':'application/json'}, 
+                                body: JSON.stringify({pk_name, pk_value, column, value: val})
+                            });
+                        }catch(err){ console.error('Update failed', err); }
+                    });
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            tbl.appendChild(tbody);
+            wrapper.appendChild(tbl);
+            
+            // Pagination controls
+            const pagCtrl = document.getElementById('db-pagination');
+            pagCtrl.innerHTML = '';
+            if (totalPages > 1) {
+                if (dbPage > 1) {
+                    const btn = document.createElement('button');
+                    btn.textContent = '← Poprzednia';
+                    btn.onclick = () => { dbPage--; renderDbTable(); };
+                    pagCtrl.appendChild(btn);
+                }
+                const span = document.createElement('span');
+                span.textContent = `Strona ${dbPage} / ${totalPages}`;
+                span.style.padding = '6px 10px';
+                pagCtrl.appendChild(span);
+                if (dbPage < totalPages) {
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Następna →';
+                    btn.onclick = () => { dbPage++; renderDbTable(); };
+                    pagCtrl.appendChild(btn);
+                }
+            }
+        }catch(e){ console.error('Error loading table:', e); }
+    }
+
+    // ========== HTTP LOGS TAB ==========
+    async function loadLogs(){
+        try{
+            const data = await api('logs?limit=10000');
+            const wrapper = document.getElementById('logs-table'); 
+            wrapper.innerHTML = '';
+            
+            let rows = data || [];
+
+            logDataById.clear();
+            rows.forEach(row => {
+                if (row && typeof row.id !== 'undefined') {
+                    logDataById.set(row.id, row);
+                }
+            });
+            // Drop selections that no longer exist
+            Array.from(logSelections).forEach(id => {
+                if (!logDataById.has(Number(id))) {
+                    logSelections.delete(Number(id));
+                }
+            });
+            
+            // Filter by status
+            if (logsFilter) {
+                if (logsFilter === 'error') {
+                    rows = rows.filter(r => r.is_error);
+                } else {
+                    const statusRange = logsFilter.charAt(0);
+                    rows = rows.filter(r => String(r.response_status || '').charAt(0) === statusRange);
+                }
+            }
+            
+            // Filter by search
+            if (logsSearch) {
+                const search = logsSearch.toLowerCase();
+                rows = rows.filter(r => 
+                    (r.path || '').toLowerCase().includes(search) ||
+                    (r.client_ip || '').toLowerCase().includes(search)
+                );
+            }
+            
+            const totalRows = rows.length;
+            const totalPages = Math.ceil(totalRows / logsPageSize);
+            const start = (logsPage - 1) * logsPageSize;
+            const end = start + logsPageSize;
+            const pageRows = rows.slice(start, end);
+            
+            const tbl = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <th><input type="checkbox" id="logs-select-all"></th>
+                <th>czas</th>
+                <th>IP</th>
+                <th>subdomena</th>
+                <th>metoda</th>
+                <th>path</th>
+                <th>status</th>
+                <th>backend</th>
+            `;
+            thead.appendChild(tr);
+            tbl.appendChild(thead);
+            
+            const tbody = document.createElement('tbody');
+            pageRows.forEach(r => {
+                const tr = document.createElement('tr');
+                const ts = new Date(r.created_at).toLocaleString('pl-PL');
+                const statusClass = r.is_error ? 'error' : (String(r.response_status || '200').charAt(0) === '2' ? 'success' : 'redirect');
+                const checked = logSelections.has(Number(r.id)) ? 'checked' : '';
+                tr.innerHTML = `
+                    <td><input type="checkbox" class="log-checkbox" data-id="${r.id}" ${checked}></td>
+                    <td>${ts}</td>
+                    <td>${r.client_ip || '-'}</td>
+                    <td><strong>${r.subdomain || ''}</strong></td>
+                    <td>${r.method}</td>
+                    <td><code>${r.path}</code></td>
+                    <td><span class="client-indicator ${statusClass}">${r.response_status}</span></td>
+                    <td>${r.backend_duration_ms || 0} ms</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            tbl.appendChild(tbody);
+            wrapper.appendChild(tbl);
+
+            attachLogCheckboxHandlers();
+            updateLogsActionBar();
+            
+            // Pagination
+            const pagCtrl = document.getElementById('logs-pagination');
+            pagCtrl.innerHTML = '';
+            if (totalPages > 1) {
+                if (logsPage > 1) {
+                    const btn = document.createElement('button');
+                    btn.textContent = '← Poprzednia';
+                    btn.onclick = () => { logsPage--; loadLogs(); };
+                    pagCtrl.appendChild(btn);
+                }
+                const span = document.createElement('span');
+                span.textContent = `Strona ${logsPage} / ${totalPages} (${totalRows} logów)`;
+                span.style.padding = '6px 10px';
+                pagCtrl.appendChild(span);
+                if (logsPage < totalPages) {
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Następna →';
+                    btn.onclick = () => { logsPage++; loadLogs(); };
+                    pagCtrl.appendChild(btn);
+                }
+            }
+        }catch(e){ console.error('Error loading logs:', e); }
+    }
+
+    function attachLogCheckboxHandlers(){
+        document.querySelectorAll('.log-checkbox').forEach(cb => {
+            cb.onchange = (e) => {
+                const id = Number(e.target.dataset.id);
+                if (!id) return;
+                if (e.target.checked) logSelections.add(id);
+                else logSelections.delete(id);
+                updateLogsActionBar();
+            };
+        });
+        const selectAll = document.getElementById('logs-select-all');
+        if (selectAll) {
+            selectAll.onchange = (e) => {
+                document.querySelectorAll('.log-checkbox').forEach(cb => {
+                    cb.checked = e.target.checked;
+                    const id = Number(cb.dataset.id);
+                    if (e.target.checked) logSelections.add(id);
+                    else logSelections.delete(id);
+                });
+                updateLogsActionBar();
+            };
+        }
+    }
+
+    function updateLogsActionBar(){
+        const bar = document.getElementById('logs-actions-bar');
+        const countEl = document.getElementById('logs-selected-count');
+        const count = logSelections.size;
+        if (countEl) countEl.textContent = count;
+        if (bar) {
+            if (count > 0) bar.classList.remove('hidden');
+            else bar.classList.add('hidden');
+        }
+        const selectAll = document.getElementById('logs-select-all');
+        if (selectAll) {
+            const checkboxes = Array.from(document.querySelectorAll('.log-checkbox'));
+            if (!checkboxes.length) {
+                selectAll.checked = false;
+            } else {
+                selectAll.checked = checkboxes.every(cb => logSelections.has(Number(cb.dataset.id)));
+            }
+        }
+    }
+
+    async function deleteSelectedLogs(){
+        if (!logSelections.size) return;
+        if (!confirm('Na pewno usunąć zaznaczone logi?')) return;
+        try {
+            const response = await fetch('/api/logs/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ log_ids: Array.from(logSelections) })
+            });
+            const result = await response.json();
+            console.log('Deleted logs', result);
+            logSelections.clear();
+            updateLogsActionBar();
+            await loadLogs();
+            await loadLogAnalytics();
+        } catch (err) {
+            console.error('Failed to delete logs:', err);
+            alert('Nie udało się usunąć logów');
+        }
+    }
+
+    function exportSelectedLogs(){
+        if (!logSelections.size) {
+            alert('Najpierw zaznacz logi');
+            return;
+        }
+        const data = Array.from(logSelections)
+            .map(id => logDataById.get(Number(id)))
+            .filter(Boolean);
+        if (!data.length) {
+            alert('Wybrane logi nie są już dostępne');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `http-logs-${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    async function loadLogAnalytics(){
+        try{
+            const bucket = Math.max(5, Math.floor(logsWindow / 24) || 5);
+            const params = new URLSearchParams({
+                minutes: logsWindow,
+                bucket_minutes: bucket,
+                top_limit: 5,
+                points: 60
+            });
+            const data = await api(`logs/analytics?${params.toString()}`);
+            renderLogStats(data.summary || {});
+            renderStatusBars(data.status_breakdown || {}, data.summary || {});
+            renderTimeline(data.timeline || []);
+            renderTopList('logs-top-subdomains', data.top_subdomains || [], 'subdomain');
+            renderTopList('logs-top-paths', data.top_paths || [], 'path', true);
+            renderErrors(data.recent_errors || []);
+        } catch (err) {
+            console.error('Error loading analytics:', err);
+        }
+    }
+
+    function formatNumber(num){
+        if (num === null || num === undefined) return '0';
+        return Number(num).toLocaleString('pl-PL');
+    }
+
+    function renderLogStats(summary){
+        const container = document.getElementById('logs-stats');
+        if (!container) return;
+        const stats = [
+            { label: 'Żądania', value: summary.total_requests || 0 },
+            { label: 'Błędy', value: summary.error_count || 0 },
+            { label: 'Śr. backend', value: `${Math.round(summary.avg_backend_ms || 0)} ms` },
+            { label: 'Unikalne IP', value: summary.unique_clients || 0 },
+            { label: 'Unikalne subdomeny', value: summary.unique_apps || 0 },
+            { label: 'Unikalni użytkownicy', value: summary.unique_users || 0 }
+        ];
+        container.innerHTML = stats.map(stat => `
+            <div class="stat-box">
+                <div class="stat-number">${formatNumber(stat.value)}</div>
+                <div class="stat-label">${stat.label}</div>
+            </div>
+        `).join('');
+    }
+
+    function renderStatusBars(breakdown, summary){
+        const container = document.getElementById('logs-status-bars');
+        if (!container) return;
+        const total = summary.total_requests || 1;
+        const bars = [
+            { label: '2xx', value: breakdown.s2xx || 0, cls: 'status-ok' },
+            { label: '3xx', value: breakdown.s3xx || 0, cls: 'status-redirect' },
+            { label: '4xx', value: breakdown.s4xx || 0, cls: 'status-client' },
+            { label: '5xx', value: breakdown.s5xx || 0, cls: 'status-server' },
+            { label: 'Błędy', value: breakdown.error_count || 0, cls: 'status-error' }
+        ];
+        container.innerHTML = bars.map(bar => {
+            const percent = Math.min(100, Math.round((bar.value / total) * 100));
+            return `
+                <div class="status-bar">
+                    <strong>${bar.label}</strong>
+                    <div class="list-meta">${formatNumber(bar.value)} żądań (${percent}%)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill ${bar.cls}" style="width:${percent}%"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderTopList(targetId, items, primaryKey, includeSubdomain){
+        const container = document.getElementById(targetId);
+        if (!container) return;
+        if (!items.length) {
+            container.innerHTML = '<p class="muted">Brak danych</p>';
+            return;
+        }
+        container.innerHTML = items.map(item => {
+            const title = item[primaryKey] || '—';
+            const sub = includeSubdomain ? item.subdomain || '' : '';
+            const latency = item.avg_backend_ms ? `${Math.round(item.avg_backend_ms)} ms` : '';
+            const errors = item.errors || 0;
+            return `
+                <div class="list-item">
+                    <div>
+                        <strong>${title}</strong>
+                        ${sub ? `<div class="muted">${sub}</div>` : ''}
+                    </div>
+                    <div>
+                        <span class="chip total">${formatNumber(item.total)} żądań</span>
+                        ${errors ? `<span class="chip error">${formatNumber(errors)} błędów</span>` : ''}
+                        ${latency ? `<span class="chip latency">${latency}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderErrors(errors){
+        const container = document.getElementById('logs-recent-errors');
+        if (!container) return;
+        if (!errors.length) {
+            container.innerHTML = '<p class="muted">Brak krytycznych błędów</p>';
+            return;
+        }
+        container.innerHTML = errors.map(err => {
+            const ts = new Date(err.created_at).toLocaleString('pl-PL');
+            return `
+                <div class="list-item">
+                    <div class="list-meta">${ts} — ${err.subdomain || ''}</div>
+                    <strong>${err.response_status || ''} ${err.method || ''}</strong>
+                    <code>${err.path || '/'}</code>
+                    <div class="muted">${err.error_message || 'Brak opisu'} (${err.backend_duration_ms || 0} ms)</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderTimeline(data){
+        logsTimelineData = data || [];
+        timelineHoverIndex = null;
+        drawTimeline();
+    }
+
+    function drawTimeline(){
+        const canvas = document.getElementById('logs-timeline-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        const width = rect.width || 400;
+        const height = rect.height || 200;
+        canvas.width = width * ratio;
+        canvas.height = height * ratio;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+
+        const padding = timelinePadding;
+        const chartWidth = Math.max(1, width - padding.left - padding.right);
+        const chartHeight = Math.max(1, height - padding.top - padding.bottom);
+
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, padding.top);
+        ctx.lineTo(padding.left, height - padding.bottom);
+        ctx.lineTo(width - padding.right, height - padding.bottom);
+        ctx.stroke();
+
+        if (!logsTimelineData.length) {
+            ctx.fillStyle = '#666';
+            ctx.fillText('Brak danych', width / 2 - 40, height / 2);
+            return;
+        }
+
+        const totals = logsTimelineData.map(p => p.total || 0);
+        const errors = logsTimelineData.map(p => p.errors || 0);
+        const maxVal = Math.max(1, ...totals);
+        const step = logsTimelineData.length > 1 ? (chartWidth / (logsTimelineData.length - 1)) : chartWidth;
+
+        // horizontal grid & labels
+        const yTicks = 4;
+        ctx.font = '10px Roboto';
+        ctx.fillStyle = '#888';
+        for (let i = 0; i <= yTicks; i++) {
+            const value = (maxVal / yTicks) * i;
+            const y = height - padding.bottom - (chartHeight * (i / yTicks));
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+            ctx.fillText(Math.round(value).toLocaleString('pl-PL'), 4, y + 3);
+        }
+
+        // vertical grid & time labels
+        const xTicks = Math.min(6, logsTimelineData.length - 1);
+        for (let i = 0; i <= xTicks; i++) {
+            const idx = Math.round((logsTimelineData.length - 1) * (i / (xTicks || 1)));
+            const x = padding.left + idx * step;
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.beginPath();
+            ctx.moveTo(x, padding.top);
+            ctx.lineTo(x, height - padding.bottom);
+            ctx.stroke();
+            const label = formatBucketLabel(logsTimelineData[idx]?.bucket_start);
+            ctx.fillText(label, x - 20, height - padding.bottom + 14);
+        }
+
+        // plot totals
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2563eb';
+        ctx.beginPath();
+        logsTimelineData.forEach((point, idx) => {
+            const x = padding.left + idx * step;
+            const y = height - padding.bottom - ((point.total || 0) / maxVal) * chartHeight;
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // plot errors
+        ctx.strokeStyle = '#f97316';
+        ctx.beginPath();
+        logsTimelineData.forEach((point, idx) => {
+            const x = padding.left + idx * step;
+            const y = height - padding.bottom - ((point.errors || 0) / maxVal) * chartHeight;
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        if (timelineHoverIndex !== null && logsTimelineData[timelineHoverIndex]) {
+            const point = logsTimelineData[timelineHoverIndex];
+            const x = padding.left + timelineHoverIndex * step;
+            const totalY = height - padding.bottom - ((point.total || 0) / maxVal) * chartHeight;
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(x, padding.top);
+            ctx.lineTo(x, height - padding.bottom);
+            ctx.stroke();
+            ctx.fillStyle = '#2563eb';
+            ctx.beginPath();
+            ctx.arc(x, totalY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            const errorY = height - padding.bottom - ((point.errors || 0) / maxVal) * chartHeight;
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.arc(x, errorY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            const tooltip = `${formatBucketLabel(point.bucket_start)}\nTotal: ${point.total || 0}\nErrors: ${point.errors || 0}`;
+            drawTimelineTooltip(ctx, x, padding.top + 10, tooltip, width);
+        }
+    }
+
+    function formatBucketLabel(bucket){
+        if (!bucket) return '';
+        const date = new Date(bucket);
+        return date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function drawTimelineTooltip(ctx, x, y, text, canvasWidth){
+        const lines = text.split('\n');
+        const padding = 8;
+        const lineHeight = 14;
+        const width = Math.max(...lines.map(line => ctx.measureText(line).width)) + padding * 2;
+        const height = lines.length * lineHeight + padding;
+        let boxX = x + 10;
+        if (boxX + width > canvasWidth) boxX = x - width - 10;
+        ctx.fillStyle = 'rgba(15,15,18,0.95)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, boxX, y, width, height, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#f5f5f5';
+        lines.forEach((line, idx) => {
+            ctx.fillText(line, boxX + padding, y + padding + (idx + 0.5) * lineHeight);
+        });
+    }
+
+    function roundRectPath(ctx, x, y, width, height, radius){
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    let timelineResizeTimeout = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(timelineResizeTimeout);
+        timelineResizeTimeout = setTimeout(() => drawTimeline(), 200);
+    });
+
+    const timelineCanvas = document.getElementById('logs-timeline-chart');
+    if (timelineCanvas) {
+        timelineCanvas.addEventListener('mousemove', (evt) => {
+            if (!logsTimelineData.length) return;
+            const rect = timelineCanvas.getBoundingClientRect();
+            const x = evt.clientX - rect.left;
+            const width = rect.width || 1;
+            const padding = timelinePadding;
+            const chartWidth = Math.max(1, width - padding.left - padding.right);
+            const relative = Math.min(Math.max(0, x - padding.left), chartWidth);
+            const step = logsTimelineData.length > 1 ? (chartWidth / (logsTimelineData.length - 1)) : chartWidth;
+            const idx = Math.round(relative / (step || 1));
+            timelineHoverIndex = Math.max(0, Math.min(logsTimelineData.length - 1, idx));
+            drawTimeline();
+        });
+        timelineCanvas.addEventListener('mouseleave', () => {
+            timelineHoverIndex = null;
+            drawTimeline();
+        });
+    }
+
+    // Logs filter & search
+    document.getElementById('logs-filter').onchange = (e) => {
+        logsFilter = e.target.value;
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-search').onkeyup = (e) => {
+        logsSearch = e.target.value;
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-clear-search').onclick = () => {
+        document.getElementById('logs-search').value = '';
+        logsSearch = '';
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-window').onchange = (e) => {
+        logsWindow = parseInt(e.target.value, 10) || 1440;
+        loadLogAnalytics();
+    };
+    document.getElementById('logs-btn-delete').onclick = deleteSelectedLogs;
+    document.getElementById('logs-btn-export').onclick = exportSelectedLogs;
+
+    setInterval(() => {
+        const logsTab = document.getElementById('tab-logs');
+        if (logsTab && logsTab.classList.contains('active')) {
+            loadLogAnalytics();
+        }
+    }, 60000);
+
+    // ========== USERS TAB ==========
+    async function loadUsers(){
+        try{
+            const users = await api('users');
+            const roles = await api('roles');
+            const wrapper = document.getElementById('users-list'); 
+            wrapper.innerHTML = '';
+            
+            users.forEach(u => {
+                const userDiv = document.createElement('div');
+                userDiv.className = 'user-item';
+                
+                const header = document.createElement('div');
+                header.className = 'user-header';
+                const statusClass = u.is_active ? 'status-active' : 'status-inactive';
+                const statusLabel = u.is_active ? 'Aktywny' : 'Nieaktywny';
+                const toggleLabel = u.is_active ? 'Dezaktywuj konto' : 'Aktywuj konto';
+                const toggleColor = u.is_active ? '#ff8080' : '#4ade80';
+                const actions = [];
+                actions.push(`<button class="secondary" style="color: ${toggleColor};" onclick="toggleUserActive(${u.id}, ${!u.is_active})">${toggleLabel}</button>`);
+                if (u.totp_enabled) {
+                    actions.push(`<button class="secondary" style="color: #ffaf40;" onclick="disableUser2FA(${u.id})">Wyłącz 2FA</button>`);
+                }
+                header.innerHTML = `
+                    <div>
+                        <div class="user-name">${u.username}</div>
+                        <p class="user-email">${u.email}</p>
+                        <div class="user-status ${statusClass}">${statusLabel}</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+                        ${actions.join('')}
+                    </div>
+                `;
+                userDiv.appendChild(header);
+                
+                const rolesDiv = document.createElement('div');
+                rolesDiv.className = 'user-roles';
+                roles.forEach(r => {
+                    const label = document.createElement('label');
+                    label.className = 'role-tag';
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.value = r.id;
+                    input.checked = u.roles && u.roles.includes(r.id);
+                    input.dataset.userId = u.id;
+                    input.onchange = () => updateUserRoles(u.id, input);
+                    label.appendChild(input);
+                    label.appendChild(document.createTextNode(r.name));
+                    rolesDiv.appendChild(label);
+                });
+                userDiv.appendChild(rolesDiv);
+                wrapper.appendChild(userDiv);
+            });
+        }catch(e){ console.error('Error loading users:', e); }
+    }
+
+    async function disableUser2FA(userId) {
+        if (!confirm('Jesteś pewien że chcesz wyłączyć 2FA dla tego użytkownika?')) {
+            return;
+        }
+        try {
+            const result = await api('users/disable-2fa', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+            if (result.ok) {
+                alert('2FA wyłączone pomyślnie');
+                loadUsers();
+            } else {
+                alert('Błąd: nie udało się wyłączyć 2FA');
+            }
+        } catch (err) {
+            console.error('Failed to disable 2FA:', err);
+            alert('Błąd: ' + err.message);
+        }
+    }
+
+    async function toggleUserActive(userId, shouldActivate) {
+        try {
+            const result = await api('users/set_active', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, is_active: shouldActivate })
+            });
+            if (result.ok) {
+                loadUsers();
+            } else {
+                alert('Nie udało się zmienić statusu użytkownika.');
+            }
+        } catch (err) {
+            console.error('Failed to toggle user active status:', err);
+            alert('Błąd: ' + err.message);
+        }
+    }
+
+    async function updateUserRoles(userId, checkbox) {
+        try {
+            const allCheckboxes = document.querySelectorAll(`input[data-user-id="${userId}"]`);
+            const roleIds = Array.from(allCheckboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+            await api('users/' + userId + '/roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role_ids: roleIds })
+            });
+        } catch (err) {
+            console.error('Failed to update roles:', err);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
+    // ========== ROLES TAB ==========
+    async function loadRoles(){
+        try{
+            const roles = await api('roles');
+            const perms = await api('permissions');
+            const wrapper = document.getElementById('roles-list');
+            wrapper.innerHTML = '';
+            
+            for (const r of roles) {
+                const roleDiv = document.createElement('div');
+                roleDiv.className = 'role-item';
+                
+                const header = document.createElement('div');
+                header.className = 'role-item-header';
+                header.innerHTML = `
+                    <div>
+                        <div class="role-name">${r.name}</div>
+                        <div class="role-description">${r.description || '—'}</div>
+                    </div>
+                    <button class="secondary" data-role-id="${r.id}">Edytuj</button>
+                `;
+                roleDiv.appendChild(header);
+                
+                const rolePerms = await api(`roles/${r.id}/permissions`);
+                const permsDiv = document.createElement('div');
+                permsDiv.className = 'role-perms';
+                permsDiv.innerHTML = '<strong style="width:100%;color:#aaa;font-size:11px;">Uprawnienia:</strong>';
+                
+                perms.forEach(p => {
+                    const hasPerm = rolePerms.some(rp => rp.id === p.id);
+                    const label = document.createElement('label');
+                    label.className = 'perm-tag';
+                    label.style.cursor = 'pointer';
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.value = p.id;
+                    input.checked = hasPerm;
+                    input.style.cursor = 'pointer';
+                    input.dataset.roleId = r.id;
+                    input.onchange = () => updateRolePermission(r.id, input);
+                    label.appendChild(input);
+                    label.appendChild(document.createTextNode(p.code));
+                    permsDiv.appendChild(label);
+                });
+                
+                roleDiv.appendChild(permsDiv);
+                wrapper.appendChild(roleDiv);
+            }
+        }catch(e){ console.error('Error loading roles:', e); }
+    }
+
+    async function updateRolePermission(roleId, checkbox) {
+        try {
+            const action = checkbox.checked ? 'assign' : 'deassign';
+            await api(`roles/${roleId}/permissions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: action,
+                    permission_id: parseInt(checkbox.value)
+                })
+            });
+        } catch (err) {
+            console.error('Failed to update permission:', err);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
+    // ========== NEW ROLE/PERMISSION BUTTONS (safely attached) ==========
+    function attachRoleButtons(){
+        const btnRole = document.getElementById('btn-new-role');
+        const btnPerm = document.getElementById('btn-new-perm');
+        console.log('[admin] attachRoleButtons()', { btnRoleExists: !!btnRole, btnPermExists: !!btnPerm });
+        if (!btnRole || !btnPerm) return false;
+
+        btnRole.onclick = async () => {
+            console.log('[admin] btn-new-role clicked');
+            try {
+                const name = prompt('Nazwa roli:');
+                if (!name || name.trim() === '') return;
+                const description = prompt('Opis (opcjonalnie):');
+                await api('roles', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name.trim(), description: description || '' })
+                });
+                await loadRoles();
+                // visual feedback
+                const prev = btnRole.textContent;
+                btnRole.textContent = '✓';
+                setTimeout(() => btnRole.textContent = prev, 700);
+                alert('Rola utworzona');
+            } catch (err) {
+                console.error('Failed to create role:', err);
+                alert('Błąd tworzenia roli');
+            }
+        };
+
+        btnPerm.onclick = async () => {
+            console.log('[admin] btn-new-perm clicked');
+            try {
+                const code = prompt('Kod uprawnzenia (np. user.read):');
+                if (!code || code.trim() === '') return;
+                const description = prompt('Opis (opcjonalnie):');
+                await api('permissions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code.trim(), description: description || '' })
+                });
+                await loadRoles();
+                const prev = btnPerm.textContent;
+                btnPerm.textContent = '✓';
+                setTimeout(() => btnPerm.textContent = prev, 700);
+                alert('Uprawnienie utworzone');
+            } catch (err) {
+                console.error('Failed to create permission:', err);
+                alert('Błąd tworzenia uprawnienia');
+            }
+        };
+        return true;
+    }
+
+    // attach immediately if possible, otherwise on DOMContentLoaded
+    if (!attachRoleButtons()){
+        document.addEventListener('DOMContentLoaded', () => {
+            attachRoleButtons();
+        });
+    }
+
+    // ensure roles are loaded at least once so UI is visible (log for debug)
+    async function initRolesLoad(){
+        try{
+            console.log('[admin] initRolesLoad() starting');
+            await loadRoles();
+            console.log('[admin] loadRoles() finished');
+        }catch(e){
+            console.error('[admin] loadRoles() failed', e);
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { initRolesLoad(); });
+    } else {
+        initRolesLoad();
+    }
+
+    // Global fallbacks (inline onclick calls these). They log immediately so we can see clicks.
+    window.__createRole = async function (ev) {
+        console.log('[admin] __createRole invoked', {target: ev && ev.target});
+        try {
+            const name = prompt('Nazwa roli:');
+            if (!name || name.trim() === '') return;
+            const description = prompt('Opis (opcjonalnie):');
+            const res = await api('roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim(), description: description || '' })
+            });
+            console.log('[admin] role create response', res);
+            await loadRoles();
+            alert('Rola utworzona');
+        } catch (err) {
+            console.error('[admin] __createRole error', err);
+            alert('Błąd tworzenia roli');
+        }
+    };
+
+    window.__createPerm = async function (ev) {
+        console.log('[admin] __createPerm invoked', {target: ev && ev.target});
+        try {
+            const code = prompt('Kod uprawnienia (np. user.read):');
+            if (!code || code.trim() === '') return;
+            const description = prompt('Opis (opcjonalnie):');
+            const res = await api('permissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: code.trim(), description: description || '' })
+            });
+            console.log('[admin] perm create response', res);
+            await loadRoles();
+            alert('Uprawnienie utworzone');
+        } catch (err) {
+            console.error('[admin] __createPerm error', err);
+            alert('Błąd tworzenia uprawnienia');
+        }
+    };
+    </script>
+</body>
+</html>

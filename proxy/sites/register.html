@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <title>Rejestracja</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        html, body { height: 100%; margin: 0; }
+        body {
+            display: flex; align-items: center; justify-content: center;
+            background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif;
+        }
+        h1 {
+            font-size: 32px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            font-weight: 300;
+            text-align: center;
+        }
+        .box { width: 320px; max-width: 90%; }
+        form { display: flex; flex-direction: column; gap: 12px; }
+        input { background: #0b0b0d; border: 1px solid #222; color: #eee; padding: 12px 14px; border-radius: 6px; font-size: 16px; }
+        input[type="submit"] { background: #1f1f1f; cursor: pointer; font-weight: 600; }
+        .error { color: #ff8080; font-size: 14px; text-align: center; min-height: 18px; margin-top: 8px; }
+        .muted { font-size: 13px; color: #999; text-align: center; margin-top: 8px; }
+        .muted a { color: white; text-decoration: none; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>Rejestracja</h1>
+        <form method="post">
+            <input type="hidden" name="next" value="{NEXT_URL}" />
+            <input type="text" name="username" placeholder="Nazwa użytkownika" autofocus />
+            <input type="email" name="email" placeholder="Adres e-mail" />
+            <input type="password" name="password" placeholder="Hasło" />
+            <input type="password" name="password_confirm" placeholder="Powtórz hasło" />
+            <input type="submit" value="Zarejestruj" />
+        </form>
+        <div class="muted">Masz już konto? <a href="/login">Zaloguj się</a></div>
+        <div class="error">{ERROR_MESSAGE}</div>
+    </div>
+</body>
+</html>

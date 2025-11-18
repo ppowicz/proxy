@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Ruch HTTP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        .section { padding: 16px; background: #0b0b0d; border-radius: 6px; margin-bottom: 16px; border: 1px solid #1a1a1d; }
+        .controls { margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .controls label { display: inline-flex; flex-direction: column; gap: 4px; font-size: 13px; color: #ddd; }
+        .controls select, .controls input { background: #151517; color: #fff; border: 1px solid #333; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+        button { background: #1f1f1f; color: #fff; border: 1px solid #333; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #2a2a2d; border-color: #555; }
+        button.secondary { background: transparent; border-color: #333; }
+        button.secondary:hover { background: #151517; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .stat-box { background: #151517; padding: 16px; border-radius: 6px; text-align: center; border: 1px solid #222; }
+        .stat-number { font-size: 32px; font-weight: 700; margin: 0; }
+        .stat-label { font-size: 11px; color: #888; margin-top: 8px; }
+        .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+        .chart-panel, .list-panel { background: #0f0f11; border: 1px solid #1a1a1d; border-radius: 6px; padding: 16px; }
+        .panel-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 12px; }
+        #logs-timeline-chart { width: 100%; height: 220px; display: block; }
+        .list-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1c1c1f; font-size: 13px; }
+        .list-item:last-child { border-bottom: none; }
+        .list-item strong { color: #fff; }
+        .list-meta { color: #888; font-size: 11px; }
+        .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; margin-left: 6px; border: 1px solid rgba(255,255,255,0.1); }
+        .chip.error { color: #f87171; border-color: rgba(248,113,113,0.4); }
+        .chip.latency { color: #60a5fa; border-color: rgba(96,165,250,0.4); }
+        .chip.total { color: #a5b4fc; border-color: rgba(165,180,252,0.4); }
+        .status-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .status-bar { padding: 12px; background: #111113; border: 1px solid #1d1d20; border-radius: 6px; }
+        .status-bar strong { display: block; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: #ccc; margin-bottom: 6px; }
+        .status-bar .bar-track { width: 100%; height: 6px; background: #1f1f23; border-radius: 999px; overflow: hidden; }
+        .status-bar .bar-fill { height: 100%; border-radius: 999px; }
+        .status-ok { background: linear-gradient(90deg, #15803d, #4ade80); }
+        .status-redirect { background: linear-gradient(90deg, #a16207, #facc15); }
+        .status-client { background: linear-gradient(90deg, #b45309, #f97316); }
+        .status-server { background: linear-gradient(90deg, #b91c1c, #f87171); }
+        .status-error { background: linear-gradient(90deg, #9d174d, #ec4899); }
+        .muted { color: #777; font-size: 11px; }
+        .errors-list .list-item { flex-direction: column; align-items: flex-start; }
+        .errors-list code { display: inline-block; margin-top: 4px; font-size: 12px; background: #111113; padding: 2px 6px; border-radius: 4px; }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table th { background: #151517; color: #fff; font-weight: 600; padding: 10px; border-bottom: 1px solid #222; text-align: left; }
+        table td { padding: 10px; border-bottom: 1px solid #222; color: #ddd; }
+        table th:first-child, table td:first-child { width: 32px; text-align: center; }
+        table tr:hover { background: #151517; }
+        .logs-actions { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #111113; border: 1px solid #1c1c1f; border-radius: 6px; margin-bottom: 12px; transition: opacity 0.2s ease; }
+        .logs-actions.hidden { opacity: 0; pointer-events: none; height: 0; padding: 0 16px; border-width: 0; margin-bottom: 0; }
+        .logs-actions .actions-left { font-size: 13px; color: #ddd; }
+        .logs-actions .actions-right { display: flex; gap: 8px; flex-wrap: wrap; }
+        .logs-actions button.danger { background: #7f1d1d; border-color: #b91c1c; }
+        .logs-actions button.danger:hover { background: #991b1b; }
+        .logs-actions button.outline { background: transparent; border-color: #333; }
+        .logs-actions button.outline:hover { background: #1a1a1d; }
+        .client-indicator { font-size: 12px; padding: 2px 6px; border-radius: 3px; display: inline-block; }
+        .client-indicator.success { background: #1a3a2a; color: #4ade80; }
+        .client-indicator.redirect { background: #3a3a1a; color: #facc15; }
+        .client-indicator.error { background: #3a1a1a; color: #f87171; }
+        .pagination { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 16px; font-size: 12px; }
+        .pagination button, .pagination span { padding: 6px 10px; border-radius: 4px; border: 1px solid #333; background: #151517; color: #fff; }
+        .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/">🏠 Strona główna</a>
+                <a href="/db">📊 Baza danych</a>
+                <a href="/logs" class="active">🔍 Ruch HTTP</a>
+                <a href="/users">👥 Użytkownicy</a>
+                <a href="/roles">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Ruch HTTP</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <div class="controls">
+                    <label>Zakres czasu:
+                        <select id="logs-window">
+                            <option value="60">Ostatnia godzina</option>
+                            <option value="360">Ostatnie 6 godzin</option>
+                            <option value="1440" selected>Ostatnie 24 godziny</option>
+                            <option value="10080">Ostatnie 7 dni</option>
+                        </select>
+                    </label>
+                    <label>Filtruj:
+                        <select id="logs-filter">
+                            <option value="">Wszystkie żądania</option>
+                            <option value="2xx">2xx (OK)</option>
+                            <option value="3xx">3xx (Redirect)</option>
+                            <option value="4xx">4xx (Client Error)</option>
+                            <option value="5xx">5xx (Server Error)</option>
+                            <option value="error">Błędy</option>
+                        </select>
+                    </label>
+                    <label>Szukaj:
+                        <input type="text" id="logs-search" placeholder="Szukaj po Path/IP...">
+                    </label>
+                    <button id="logs-clear-search" class="secondary">Wyczyść</button>
+                </div>
+            </section>
+            <section class="section">
+                <div id="logs-stats" class="stats"></div>
+                <div id="logs-status-bars" class="status-bars"></div>
+            </section>
+            <section class="section analytics-grid">
+                <div class="chart-panel">
+                    <div class="panel-title">Trendy ruchu</div>
+                    <canvas id="logs-timeline-chart"></canvas>
+                </div>
+                <div class="list-panel">
+                    <div class="panel-title">Top subdomeny</div>
+                    <div id="logs-top-subdomains"></div>
+                </div>
+            </section>
+            <section class="section analytics-grid">
+                <div class="list-panel">
+                    <div class="panel-title">Popularne ścieżki</div>
+                    <div id="logs-top-paths"></div>
+                </div>
+                <div class="list-panel">
+                    <div class="panel-title">Ostatnie błędy</div>
+                    <div id="logs-recent-errors" class="errors-list"></div>
+                </div>
+            </section>
+            <section class="section">
+                <div id="logs-actions-bar" class="logs-actions hidden">
+                    <div class="actions-left">Wybrano <strong id="logs-selected-count">0</strong> logów</div>
+                    <div class="actions-right">
+                        <button id="logs-btn-delete" class="danger" type="button">Usuń zaznaczone</button>
+                        <button id="logs-btn-export" class="outline" type="button">Eksportuj JSON</button>
+                    </div>
+                </div>
+                <div id="logs-table" class="table-wrapper"></div>
+            </section>
+            <div id="logs-pagination" class="pagination"></div>
+        </main>
+    </div>
+    <script>
+    let logsPage = 1;
+    const logsPageSize = 50;
+    let logsFilter = '';
+    let logsSearch = '';
+    let logsWindow = 1440;
+    let logsTimelineData = [];
+    let timelineHoverIndex = null;
+    const timelinePadding = { top: 20, right: 20, bottom: 40, left: 50 };
+    const logSelections = new Set();
+    const logDataById = new Map();
+
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    async function loadLogs() {
+        try {
+            const data = await api('logs?limit=10000');
+            const wrapper = document.getElementById('logs-table');
+            wrapper.innerHTML = '';
+            let rows = data || [];
+            logDataById.clear();
+            rows.forEach(row => {
+                if (row && typeof row.id !== 'undefined') {
+                    logDataById.set(row.id, row);
+                }
+            });
+            Array.from(logSelections).forEach(id => {
+                if (!logDataById.has(Number(id))) {
+                    logSelections.delete(Number(id));
+                }
+            });
+            if (logsFilter) {
+                if (logsFilter === 'error') rows = rows.filter(r => r.is_error);
+                else {
+                    const statusRange = logsFilter.charAt(0);
+                    rows = rows.filter(r => String(r.response_status || '').charAt(0) === statusRange);
+                }
+            }
+            if (logsSearch) {
+                const search = logsSearch.toLowerCase();
+                rows = rows.filter(r => (
+                    (r.path || '').toLowerCase().includes(search) ||
+                    (r.client_ip || '').toLowerCase().includes(search) ||
+                    (r.auth_username || '').toLowerCase().includes(search)
+                ));
+            }
+            const totalRows = rows.length;
+            const totalPages = Math.max(1, Math.ceil(totalRows / logsPageSize));
+            logsPage = Math.min(logsPage, totalPages);
+            const start = (logsPage - 1) * logsPageSize;
+            const pageRows = rows.slice(start, start + logsPageSize);
+
+            const tbl = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <th><input type="checkbox" id="logs-select-all"></th>
+                <th>czas</th>
+                <th>IP</th>
+                <th>użytkownik</th>
+                <th>subdomena</th>
+                <th>metoda</th>
+                <th>path</th>
+                <th>status</th>
+                <th>backend</th>`;
+            thead.appendChild(tr);
+            tbl.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            pageRows.forEach(r => {
+                const rowEl = document.createElement('tr');
+                const ts = new Date(r.created_at).toLocaleString('pl-PL');
+                const statusClass = r.is_error ? 'error' : (String(r.response_status || '200').charAt(0) === '2' ? 'success' : 'redirect');
+                const checked = logSelections.has(Number(r.id)) ? 'checked' : '';
+                rowEl.innerHTML = `
+                    <td><input type="checkbox" class="log-checkbox" data-id="${r.id}" ${checked}></td>
+                    <td>${ts}</td>
+                    <td>${r.client_ip || '-'}</td>
+                    <td>${r.auth_username || '—'}</td>
+                    <td><strong>${r.subdomain || ''}</strong></td>
+                    <td>${r.method}</td>
+                    <td><code>${r.path}</code></td>
+                    <td><span class="client-indicator ${statusClass}">${r.response_status}</span></td>
+                    <td>${r.backend_duration_ms || 0} ms</td>`;
+                tbody.appendChild(rowEl);
+            });
+            tbl.appendChild(tbody);
+            wrapper.appendChild(tbl);
+            attachLogCheckboxHandlers();
+            updateLogsActionBar();
+            renderLogsPagination(totalPages, totalRows);
+        } catch (err) {
+            console.error('Error loading logs', err);
+        }
+    }
+
+    function renderLogsPagination(totalPages, totalRows) {
+        const pagCtrl = document.getElementById('logs-pagination');
+        pagCtrl.innerHTML = '';
+        if (totalPages <= 1) return;
+        const prev = document.createElement('button');
+        prev.textContent = '← Poprzednia';
+        prev.disabled = logsPage <= 1;
+        prev.onclick = () => { logsPage--; loadLogs(); };
+        pagCtrl.appendChild(prev);
+        const span = document.createElement('span');
+        span.textContent = `Strona ${logsPage} / ${totalPages} (${totalRows} logów)`;
+        pagCtrl.appendChild(span);
+        const next = document.createElement('button');
+        next.textContent = 'Następna →';
+        next.disabled = logsPage >= totalPages;
+        next.onclick = () => { logsPage++; loadLogs(); };
+        pagCtrl.appendChild(next);
+    }
+
+    function attachLogCheckboxHandlers() {
+        document.querySelectorAll('.log-checkbox').forEach(cb => {
+            cb.onchange = (e) => {
+                const id = Number(e.target.dataset.id);
+                if (!id) return;
+                if (e.target.checked) logSelections.add(id);
+                else logSelections.delete(id);
+                updateLogsActionBar();
+            };
+        });
+        const selectAll = document.getElementById('logs-select-all');
+        if (selectAll) {
+            selectAll.onchange = (e) => {
+                document.querySelectorAll('.log-checkbox').forEach(cb => {
+                    cb.checked = e.target.checked;
+                    const id = Number(cb.dataset.id);
+                    if (e.target.checked) logSelections.add(id);
+                    else logSelections.delete(id);
+                });
+                updateLogsActionBar();
+            };
+        }
+    }
+
+    function updateLogsActionBar() {
+        const bar = document.getElementById('logs-actions-bar');
+        const countEl = document.getElementById('logs-selected-count');
+        const count = logSelections.size;
+        if (countEl) countEl.textContent = count;
+        if (bar) {
+            if (count > 0) bar.classList.remove('hidden');
+            else bar.classList.add('hidden');
+        }
+        const selectAll = document.getElementById('logs-select-all');
+        if (selectAll) {
+            const checkboxes = Array.from(document.querySelectorAll('.log-checkbox'));
+            if (!checkboxes.length) selectAll.checked = false;
+            else selectAll.checked = checkboxes.every(cb => logSelections.has(Number(cb.dataset.id)));
+        }
+    }
+
+    async function deleteSelectedLogs() {
+        if (!logSelections.size) return;
+        if (!confirm('Na pewno usunąć zaznaczone logi?')) return;
+        try {
+            const res = await fetch('/api/logs/delete', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                body: JSON.stringify({ log_ids: Array.from(logSelections) })
+            });
+            await res.json();
+            logSelections.clear();
+            updateLogsActionBar();
+            await loadLogs();
+            await loadLogAnalytics();
+        } catch (err) {
+            console.error('Failed to delete logs', err);
+            alert('Nie udało się usunąć logów');
+        }
+    }
+
+    function exportSelectedLogs() {
+        if (!logSelections.size) {
+            alert('Najpierw zaznacz logi');
+            return;
+        }
+        const data = Array.from(logSelections).map(id => logDataById.get(Number(id))).filter(Boolean);
+        if (!data.length) {
+            alert('Wybrane logi nie są już dostępne');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `http-logs-${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    async function loadLogAnalytics() {
+        try {
+            const bucket = Math.max(5, Math.floor(logsWindow / 24) || 5);
+            const params = new URLSearchParams({ minutes: logsWindow, bucket_minutes: bucket, top_limit: 5, points: 60 });
+            const data = await api(`logs/analytics?${params.toString()}`);
+            renderLogStats(data.summary || {});
+            renderStatusBars(data.status_breakdown || {}, data.summary || {});
+            renderTimeline(data.timeline || []);
+            renderTopList('logs-top-subdomains', data.top_subdomains || [], 'subdomain');
+            renderTopList('logs-top-paths', data.top_paths || [], 'path', true);
+            renderErrors(data.recent_errors || []);
+        } catch (err) {
+            console.error('Error loading analytics', err);
+        }
+    }
+
+    function formatNumber(num) {
+        if (num === null || num === undefined) return '0';
+        return Number(num).toLocaleString('pl-PL');
+    }
+
+    function renderLogStats(summary) {
+        const container = document.getElementById('logs-stats');
+        if (!container) return;
+        const stats = [
+            { label: 'Żądania', value: summary.total_requests || 0 },
+            { label: 'Błędy', value: summary.error_count || 0 },
+            { label: 'Śr. backend', value: `${Math.round(summary.avg_backend_ms || 0)} ms` },
+            { label: 'Unikalne IP', value: summary.unique_clients || 0 },
+            { label: 'Unikalne subdomeny', value: summary.unique_apps || 0 },
+            { label: 'Unikalni użytkownicy', value: summary.unique_users || 0 }
+        ];
+        container.innerHTML = stats.map(stat => `
+            <div class="stat-box">
+                <div class="stat-number">${formatNumber(stat.value)}</div>
+                <div class="stat-label">${stat.label}</div>
+            </div>`).join('');
+    }
+
+    function renderStatusBars(breakdown, summary) {
+        const container = document.getElementById('logs-status-bars');
+        if (!container) return;
+        const total = summary.total_requests || 1;
+        const bars = [
+            { label: '2xx', value: breakdown.s2xx || 0, cls: 'status-ok' },
+            { label: '3xx', value: breakdown.s3xx || 0, cls: 'status-redirect' },
+            { label: '4xx', value: breakdown.s4xx || 0, cls: 'status-client' },
+            { label: '5xx', value: breakdown.s5xx || 0, cls: 'status-server' },
+            { label: 'Błędy', value: breakdown.error_count || 0, cls: 'status-error' }
+        ];
+        container.innerHTML = bars.map(bar => {
+            const percent = Math.min(100, Math.round((bar.value / total) * 100));
+            return `
+                <div class="status-bar">
+                    <strong>${bar.label}</strong>
+                    <div class="list-meta">${formatNumber(bar.value)} żądań (${percent}%)</div>
+                    <div class="bar-track"><div class="bar-fill ${bar.cls}" style="width:${percent}%"></div></div>
+                </div>`;
+        }).join('');
+    }
+
+    function renderTopList(targetId, items, primaryKey, includeSubdomain) {
+        const container = document.getElementById(targetId);
+        if (!container) return;
+        if (!items.length) {
+            container.innerHTML = '<p class="muted">Brak danych</p>';
+            return;
+        }
+        container.innerHTML = items.map(item => {
+            const title = item[primaryKey] || '—';
+            const sub = includeSubdomain ? item.subdomain || '' : '';
+            const latency = item.avg_backend_ms ? `${Math.round(item.avg_backend_ms)} ms` : '';
+            const errors = item.errors || 0;
+            return `
+                <div class="list-item">
+                    <div>
+                        <strong>${title}</strong>
+                        ${sub ? `<div class="muted">${sub}</div>` : ''}
+                    </div>
+                    <div>
+                        <span class="chip total">${formatNumber(item.total)} żądań</span>
+                        ${errors ? `<span class="chip error">${formatNumber(errors)} błędów</span>` : ''}
+                        ${latency ? `<span class="chip latency">${latency}</span>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    function renderErrors(errors) {
+        const container = document.getElementById('logs-recent-errors');
+        if (!container) return;
+        if (!errors.length) {
+            container.innerHTML = '<p class="muted">Brak krytycznych błędów</p>';
+            return;
+        }
+        container.innerHTML = errors.map(err => {
+            const ts = new Date(err.created_at).toLocaleString('pl-PL');
+            return `
+                <div class="list-item">
+                    <div class="list-meta">${ts} — ${err.subdomain || ''}</div>
+                    <strong>${err.response_status || ''} ${err.method || ''}</strong>
+                    <code>${err.path || '/'}</code>
+                    <div class="muted">${err.error_message || 'Brak opisu'} (${err.backend_duration_ms || 0} ms)</div>
+                </div>`;
+        }).join('');
+    }
+
+    function renderTimeline(data) {
+        logsTimelineData = data || [];
+        timelineHoverIndex = null;
+        drawTimeline();
+    }
+
+    function drawTimeline() {
+        const canvas = document.getElementById('logs-timeline-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        const width = rect.width || 400;
+        const height = rect.height || 200;
+        canvas.width = width * ratio;
+        canvas.height = height * ratio;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        const padding = timelinePadding;
+        const chartWidth = Math.max(1, width - padding.left - padding.right);
+        const chartHeight = Math.max(1, height - padding.top - padding.bottom);
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, padding.top);
+        ctx.lineTo(padding.left, height - padding.bottom);
+        ctx.lineTo(width - padding.right, height - padding.bottom);
+        ctx.stroke();
+        if (!logsTimelineData.length) {
+            ctx.fillStyle = '#666';
+            ctx.fillText('Brak danych', width / 2 - 40, height / 2);
+            return;
+        }
+        const totals = logsTimelineData.map(p => p.total || 0);
+        const maxVal = Math.max(1, ...totals);
+        const chartStep = logsTimelineData.length > 1 ? (chartWidth / (logsTimelineData.length - 1)) : chartWidth;
+        ctx.font = '10px Roboto';
+        ctx.fillStyle = '#888';
+        const yTicks = 4;
+        for (let i = 0; i <= yTicks; i++) {
+            const value = (maxVal / yTicks) * i;
+            const y = height - padding.bottom - (chartHeight * (i / yTicks));
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+            ctx.fillText(Math.round(value).toLocaleString('pl-PL'), 4, y + 3);
+        }
+        const xTicks = Math.min(6, logsTimelineData.length - 1);
+        for (let i = 0; i <= xTicks; i++) {
+            const idx = Math.round((logsTimelineData.length - 1) * (i / (xTicks || 1)));
+            const x = padding.left + idx * chartStep;
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.beginPath();
+            ctx.moveTo(x, padding.top);
+            ctx.lineTo(x, height - padding.bottom);
+            ctx.stroke();
+            const label = formatBucketLabel(logsTimelineData[idx]?.bucket_start);
+            ctx.fillText(label, x - 20, height - padding.bottom + 14);
+        }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2563eb';
+        ctx.beginPath();
+        logsTimelineData.forEach((point, idx) => {
+            const x = padding.left + idx * chartStep;
+            const y = height - padding.bottom - ((point.total || 0) / maxVal) * chartHeight;
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.strokeStyle = '#f97316';
+        ctx.beginPath();
+        logsTimelineData.forEach((point, idx) => {
+            const x = padding.left + idx * chartStep;
+            const y = height - padding.bottom - ((point.errors || 0) / maxVal) * chartHeight;
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        if (timelineHoverIndex !== null && logsTimelineData[timelineHoverIndex]) {
+            const point = logsTimelineData[timelineHoverIndex];
+            const x = padding.left + timelineHoverIndex * chartStep;
+            const totalY = height - padding.bottom - ((point.total || 0) / maxVal) * chartHeight;
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath();
+            ctx.moveTo(x, padding.top);
+            ctx.lineTo(x, height - padding.bottom);
+            ctx.stroke();
+            ctx.fillStyle = '#2563eb';
+            ctx.beginPath();
+            ctx.arc(x, totalY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            const errorY = height - padding.bottom - ((point.errors || 0) / maxVal) * chartHeight;
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.arc(x, errorY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            const tooltip = `${formatBucketLabel(point.bucket_start)}\nTotal: ${point.total || 0}\nErrors: ${point.errors || 0}`;
+            drawTimelineTooltip(ctx, x, padding.top + 10, tooltip, width);
+        }
+    }
+
+    function formatBucketLabel(bucket) {
+        if (!bucket) return '';
+        const date = new Date(bucket);
+        return date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function drawTimelineTooltip(ctx, x, y, text, canvasWidth) {
+        const lines = text.split('\n');
+        const padding = 8;
+        const lineHeight = 14;
+        const width = Math.max(...lines.map(line => ctx.measureText(line).width)) + padding * 2;
+        const height = lines.length * lineHeight + padding;
+        let boxX = x + 10;
+        if (boxX + width > canvasWidth) boxX = x - width - 10;
+        ctx.fillStyle = 'rgba(15,15,18,0.95)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, boxX, y, width, height, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#f5f5f5';
+        lines.forEach((line, idx) => {
+            ctx.fillText(line, boxX + padding, y + padding + (idx + 0.5) * lineHeight);
+        });
+    }
+
+    function roundRectPath(ctx, x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    window.addEventListener('resize', () => {
+        clearTimeout(window.__logsResizeTimeout);
+        window.__logsResizeTimeout = setTimeout(() => drawTimeline(), 200);
+    });
+
+    const timelineCanvas = document.getElementById('logs-timeline-chart');
+    if (timelineCanvas) {
+        timelineCanvas.addEventListener('mousemove', (evt) => {
+            if (!logsTimelineData.length) return;
+            const rect = timelineCanvas.getBoundingClientRect();
+            const x = evt.clientX - rect.left;
+            const width = rect.width || 1;
+            const padding = timelinePadding;
+            const chartWidth = Math.max(1, width - padding.left - padding.right);
+            const relative = Math.min(Math.max(0, x - padding.left), chartWidth);
+            const step = logsTimelineData.length > 1 ? (chartWidth / (logsTimelineData.length - 1)) : chartWidth;
+            const idx = Math.round(relative / (step || 1));
+            timelineHoverIndex = Math.max(0, Math.min(logsTimelineData.length - 1, idx));
+            drawTimeline();
+        });
+        timelineCanvas.addEventListener('mouseleave', () => {
+            timelineHoverIndex = null;
+            drawTimeline();
+        });
+    }
+
+    document.getElementById('logs-filter').onchange = (e) => {
+        logsFilter = e.target.value;
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-search').oninput = (e) => {
+        logsSearch = e.target.value;
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-clear-search').onclick = () => {
+        document.getElementById('logs-search').value = '';
+        logsSearch = '';
+        logsPage = 1;
+        loadLogs();
+    };
+    document.getElementById('logs-window').onchange = (e) => {
+        logsWindow = parseInt(e.target.value, 10) || 1440;
+        loadLogAnalytics();
+    };
+    document.getElementById('logs-btn-delete').onclick = deleteSelectedLogs;
+    document.getElementById('logs-btn-export').onclick = exportSelectedLogs;
+
+    loadLogs();
+    loadLogAnalytics();
+    setInterval(loadLogAnalytics, 60000);
+    </script>
+</body>
+</html>

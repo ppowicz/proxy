@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Użytkownicy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        .section { padding: 16px; background: #0b0b0d; border-radius: 6px; margin-bottom: 16px; border: 1px solid #1a1a1d; }
+        .user-item { padding: 16px; background: #0f0f11; border: 1px solid #1a1a1d; border-radius: 4px; margin-bottom: 12px; }
+        .user-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+        .user-name { font-weight: 600; font-size: 16px; color: #fff; }
+        .user-email { font-size: 12px; color: #888; margin: 4px 0 0; }
+        .user-status { display: inline-block; font-size: 11px; margin-top: 4px; padding: 2px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .status-active { background: #12321f; color: #4ade80; }
+        .status-inactive { background: #3a1c1c; color: #ff8080; }
+        .user-roles { display: flex; flex-wrap: wrap; gap: 6px; }
+        .role-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; background: #1a1a1d; border-radius: 3px; font-size: 12px; color: #aaa; }
+        .role-tag input[type="checkbox"] { cursor: pointer; }
+        button { background: #1f1f1f; color: #fff; border: 1px solid #333; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #2a2a2d; border-color: #555; }
+        button.secondary { background: transparent; border-color: #333; }
+        button.secondary:hover { background: #151517; }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/">🏠 Strona główna</a>
+                <a href="/db">📊 Baza danych</a>
+                <a href="/logs">🔍 Ruch HTTP</a>
+                <a href="/users" class="active">👥 Użytkownicy</a>
+                <a href="/roles">🔐 Role & uprawn.</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Użytkownicy</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <div id="users-list"></div>
+            </section>
+        </main>
+    </div>
+    <script>
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    async function loadUsers() {
+        try {
+            let [users, roles] = await Promise.all([
+                api('users'),
+                api('roles')
+            ]);
+            users = (users || []).slice().sort((a, b) => (a.id || 0) - (b.id || 0));
+            const wrapper = document.getElementById('users-list');
+            wrapper.innerHTML = '';
+            users.forEach(u => {
+                const userDiv = document.createElement('div');
+                userDiv.className = 'user-item';
+                const header = document.createElement('div');
+                header.className = 'user-header';
+                const statusClass = u.is_active ? 'status-active' : 'status-inactive';
+                const statusLabel = u.is_active ? 'Aktywny' : 'Nieaktywny';
+                const toggleLabel = u.is_active ? 'Dezaktywuj konto' : 'Aktywuj konto';
+                const toggleColor = u.is_active ? '#ff8080' : '#4ade80';
+                const actions = [];
+                const safeUsername = JSON.stringify(u.username || '');
+                actions.push(`<button class="secondary" style="color:${toggleColor};" onclick='toggleUserActive(${u.id}, ${!u.is_active})'>${toggleLabel}</button>`);
+                if (u.totp_enabled) {
+                    actions.push(`<button class="secondary" style="color:#ffaf40;" onclick='disableUser2FA(${u.id})'>Wyłącz 2FA</button>`);
+                }
+                actions.push(`<button class="secondary" style="color:#f87171;" onclick='deleteUserAccount(${u.id}, ${safeUsername})'>Usuń konto</button>`);
+                header.innerHTML = `
+                    <div>
+                        <div class="user-name">${u.username}</div>
+                        <p class="user-email">${u.email}</p>
+                        <div class="user-status ${statusClass}">${statusLabel}</div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                        ${actions.join('')}
+                    </div>`;
+                userDiv.appendChild(header);
+                const rolesDiv = document.createElement('div');
+                rolesDiv.className = 'user-roles';
+                roles.forEach(r => {
+                    const label = document.createElement('label');
+                    label.className = 'role-tag';
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.value = r.id;
+                    input.checked = u.roles && u.roles.includes(r.id);
+                    input.dataset.userId = u.id;
+                    input.onchange = () => updateUserRoles(u.id, input);
+                    label.appendChild(input);
+                    label.appendChild(document.createTextNode(r.name));
+                    rolesDiv.appendChild(label);
+                });
+                userDiv.appendChild(rolesDiv);
+                wrapper.appendChild(userDiv);
+            });
+        } catch (err) {
+            console.error('Error loading users', err);
+        }
+    }
+
+    async function disableUser2FA(userId) {
+        if (!confirm('Wyłączyć 2FA dla tego użytkownika?')) return;
+        try {
+            const result = await api('users/disable-2fa', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+            if (result.ok) loadUsers();
+            else alert('Nie udało się wyłączyć 2FA');
+        } catch (err) {
+            console.error('Failed to disable 2FA', err);
+            alert('Błąd wyłączania 2FA');
+        }
+    }
+
+    async function toggleUserActive(userId, shouldActivate) {
+        try {
+            const result = await api('users/set_active', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, is_active: shouldActivate })
+            });
+            if (result.ok) loadUsers();
+            else alert('Nie udało się zmienić statusu użytkownika');
+        } catch (err) {
+            console.error('Failed to toggle user active status', err);
+            alert('Błąd podczas zmiany statusu');
+        }
+    }
+
+    async function deleteUserAccount(userId, username) {
+        const label = username ? `Użytkownik "${username}"` : 'Ten użytkownik';
+        if (!confirm(`${label} zostanie trwale usunięty (konto przestanie istnieć). Kontynuować?`)) return;
+        try {
+            const result = await api('users/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+            if (result.ok) {
+                loadUsers();
+            } else {
+                const reason = result.error ? ` (${result.error})` : '';
+                alert('Nie udało się usunąć użytkownika' + reason);
+            }
+        } catch (err) {
+            console.error('Failed to delete user', err);
+            alert('Błąd podczas usuwania użytkownika');
+        }
+    }
+
+    async function updateUserRoles(userId, checkbox) {
+        try {
+            const allCheckboxes = document.querySelectorAll(`input[data-user-id="${userId}"]`);
+            const roleIds = Array.from(allCheckboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
+            await api(`users/${userId}/roles`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role_ids: roleIds })
+            });
+        } catch (err) {
+            console.error('Failed to update roles', err);
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
+    loadUsers();
+    </script>
+</body>
+</html>
