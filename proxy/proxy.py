@@ -22,6 +22,10 @@ from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
 
+from core.admin import (
+    handle_admin_api as core_handle_admin_api,
+    handle_admin_panel as core_handle_admin_panel,
+)
 from core.templates import (
     ADMIN_PAGE_FILES,
     ADMIN_PAGE_TEMPLATES,
@@ -1821,31 +1825,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     
     def handle_admin_panel(self):
         """Handle admin panel at admin.ppowicz.pl."""
-        user = self.get_session_user()
-        if not user:
-            next_param = "next=https://admin.ppowicz.pl"
-            self.send_response(302)
-            self.send_header("Location", f"https://ppowicz.pl/login?{next_param}")
-            self.end_headers()
-            return
-        
-        # Check if user has admin permission
-        if not user_is_admin(user['id']):
-            self.send_error_page("401")
-            return
-        
-        path_only = self.path.split('?', 1)[0] if '?' in self.path else self.path
-        path_only = path_only or '/'
-        if path_only != '/' and path_only.endswith('/'):
-            path_only = path_only.rstrip('/')
-        page_key = ADMIN_ROUTE_TO_TEMPLATE.get(path_only)
-        if not page_key:
-            self.send_error_page("404")
-            return
-
-        # Show admin interface
-        html = self._render_admin_panel(user, page_key)
-        self._send_html_response(200, html, is_error=False)
+        core_handle_admin_panel(self)
     
     def send_json(self, obj, status: int = 200):
         """Send JSON response."""
@@ -1868,261 +1848,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def handle_admin_api(self):
         """Handle admin JSON API under /api/..."""
-        # Must be logged in + admin
-        user = self.get_session_user()
-        if not user:
-            self.send_response(302)
-            self.send_header("Location", "https://ppowicz.pl/login")
-            self.end_headers()
-            return
-        if not user_is_admin(user['id']):
-            self.send_error_page('401')
-            return
-
-        # Strip prefix and split path and query
-        path = self.path[len('/api/'):]
-        path_only = path.split('?', 1)[0]
-        qs = ''
-        if '?' in path:
-            qs = path.split('?', 1)[1]
-        # Simple router
-        try:
-            if self.command == 'GET' and path_only == 'logs':
-                # /api/logs?limit=200
-                params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-                limit = int(params.get('limit', 200)) if params.get('limit') else 200
-                rows = get_recent_http_logs(limit)
-                return self.send_json(rows)
-
-            if self.command == 'GET' and path_only == 'logs/analytics':
-                params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-                window_minutes = int(params.get('minutes', 1440)) if params.get('minutes') else 1440
-                bucket_minutes = int(params.get('bucket_minutes', max(5, window_minutes // 24 or 5)))
-                top_limit = int(params.get('top_limit', 5)) if params.get('top_limit') else 5
-                timeline_points = int(params.get('points', 60)) if params.get('points') else 60
-                analytics = {
-                    'summary': get_http_log_summary(window_minutes),
-                    'status_breakdown': get_http_log_status_breakdown(window_minutes),
-                    'timeline': get_http_log_timeline(window_minutes, bucket_minutes, timeline_points),
-                    'top_subdomains': get_top_http_subdomains(window_minutes, top_limit),
-                    'top_paths': get_top_http_paths(window_minutes, top_limit),
-                    'recent_errors': get_recent_http_errors(top_limit * 2),
-                }
-                return self.send_json(analytics)
-
-            if self.command == 'POST' and path_only == 'logs/delete':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                log_ids = data.get('log_ids') or []
-                removed = delete_http_logs(log_ids)
-                return self.send_json({'removed': removed})
-
-            if self.command == 'GET' and path_only.startswith('db/'):
-                # /api/db/<table>?limit=200 or /api/db/tables
-                parts = path_only.split('/')
-                if len(parts) == 2 and parts[1] == 'tables':
-                    # list tables
-                    conn = DBConnection.get_connection()
-                    tables = []
-                    if conn:
-                        try:
-                            with conn:
-                                with conn.cursor() as cur:
-                                    cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name")
-                                    rows = cur.fetchall() or []
-                                    tables = [r['table_name'] for r in rows]
-                        except Exception:
-                            tables = []
-                        finally:
-                            conn.close()
-                    return self.send_json(tables)
-
-                table = parts[1]
-                params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-                limit = int(params.get('limit', 200)) if params.get('limit') else 200
-                cols = get_table_columns(table)
-                rows = get_table_rows(table, limit)
-                return self.send_json({'columns': cols, 'rows': rows})
-
-            if self.command == 'POST' and path_only.startswith('db/') and path_only.endswith('/update'):
-                # /api/db/<table>/update
-                table = path_only.split('/')[1]
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                ok = update_table_row(table, data.get('pk_name'), data.get('pk_value'), data.get('column'), data.get('value'))
-                return self.send_json({'ok': bool(ok)})
-
-            if self.command == 'GET' and path_only == 'users':
-                users = get_all_users()
-                # attach roles ids
-                for u in users:
-                    u['roles'] = [r['id'] for r in get_user_roles(u['id'])]
-                return self.send_json(users)
-
-            if self.command == 'GET' and path_only == 'roles':
-                return self.send_json(get_all_roles())
-
-            if self.command == 'GET' and path_only == 'permissions':
-                return self.send_json(get_all_permissions())
-
-            if self.command == 'POST' and path_only == 'users/assign_role':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                ok = assign_role_to_user(data.get('user_id'), data.get('role_id'))
-                return self.send_json({'ok': bool(ok)})
-
-            if self.command == 'POST' and path_only == 'users/set_active':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                user_id = data.get('user_id')
-                is_active = data.get('is_active')
-                if user_id is None or is_active is None:
-                    return self.send_json({'ok': False})
-                active_flag = bool(is_active) if isinstance(is_active, bool) else str(is_active).lower() in ('1', 'true', 'yes')
-                ok = update_user(user_id, is_active=active_flag)
-                return self.send_json({'ok': bool(ok)})
-
-            if self.command == 'POST' and path_only == 'users/delete':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                target_id = data.get('user_id')
-                if target_id is None:
-                    return self.send_json({'ok': False, 'error': 'missing_user_id'}, status=400)
-                try:
-                    target_id = int(target_id)
-                except (TypeError, ValueError):
-                    return self.send_json({'ok': False, 'error': 'invalid_user_id'}, status=400)
-                if target_id == user['id']:
-                    return self.send_json({'ok': False, 'error': 'cannot_delete_self'}, status=400)
-                ok = delete_user(target_id)
-                return self.send_json({'ok': bool(ok)})
-
-            if self.command == 'POST' and path_only == 'users/deassign_role':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                ok = deassign_role_from_user(data.get('user_id'), data.get('role_id'))
-                return self.send_json({'ok': bool(ok)})
-
-            if self.command == 'POST' and path_only == 'users/disable-2fa':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                user_id = data.get('user_id')
-                if user_id:
-                    ok = disable_totp(user_id)
-                    return self.send_json({'ok': bool(ok)})
-                return self.send_json({'ok': False})
-
-            if self.command == 'GET' and path_only == 'dashboard/metrics':
-                return self.send_json(_get_dashboard_metrics())
-
-            if self.command == 'GET' and path_only == 'projects/status':
-                # Ping local backends and measure response time
-                results = []
-                for subdomain, proj in PROJECTS.items():
-                    status = 'down'
-                    rt = None
-                    try:
-                        conn = http.client.HTTPConnection('127.0.0.1', proj.port, timeout=2)
-                        t0 = time.time()
-                        conn.request('GET', '/')
-                        r = conn.getresponse()
-                        data = r.read(64)
-                        t1 = time.time()
-                        rt = int((t1 - t0) * 1000)
-                        status = 'ok' if r.status < 500 else 'error'
-                        conn.close()
-                    except Exception:
-                        status = 'down'
-                    results.append({'subdomain': subdomain, 'status': status, 'response_time_ms': rt})
-                return self.send_json(results)
-
-            # ====== ROLES & PERMISSIONS API ======
-            if self.command == 'POST' and path_only == 'roles':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                role_id = create_role(data.get('name', ''), data.get('description', ''))
-                return self.send_json({'ok': bool(role_id), 'id': role_id})
-
-            if self.command == 'POST' and path_only.startswith('roles/') and path_only.endswith('/update'):
-                role_id = int(path_only.split('/')[1])
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                ok = update_role(role_id, data.get('name'), data.get('description'))
-                return self.send_json({'ok': ok})
-
-            if self.command == 'POST' and path_only.startswith('roles/') and path_only.endswith('/permissions'):
-                parts = path_only.split('/')
-                role_id = int(parts[1])
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                # data.action = 'assign' or 'deassign', data.permission_id
-                perm_id = data.get('permission_id')
-                action = data.get('action', 'assign')
-                if action == 'assign':
-                    ok = assign_permission_to_role(role_id, perm_id)
-                else:
-                    ok = deassign_permission_from_role(role_id, perm_id)
-                return self.send_json({'ok': ok})
-
-            if self.command == 'GET' and path_only.startswith('roles/') and path_only.endswith('/permissions'):
-                role_id = int(path_only.split('/')[1])
-                perms = get_role_permissions(role_id)
-                return self.send_json(perms)
-
-            if self.command == 'POST' and path_only == 'permissions':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                perm_id = create_permission(data.get('code', ''), data.get('description', ''))
-                return self.send_json({'ok': bool(perm_id), 'id': perm_id})
-
-            # ====== USERS MANAGEMENT API ======
-            if self.command == 'POST' and path_only == 'users/update':
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                ok = update_user(
-                    data.get('user_id'),
-                    username=data.get('username'),
-                    email=data.get('email'),
-                    is_active=data.get('is_active'),
-                    password=data.get('password')
-                )
-                return self.send_json({'ok': ok})
-
-            if self.command == 'POST' and path_only.startswith('users/') and path_only.endswith('/roles'):
-                user_id = int(path_only.split('/')[1])
-                length = int(self.headers.get('Content-Length', '0') or '0')
-                body = self.rfile.read(length) if length > 0 else b''
-                data = json.loads(body.decode('utf-8') or '{}') if body else {}
-                role_ids = data.get('role_ids', [])
-                ok = bulk_assign_roles_to_user(user_id, role_ids)
-                return self.send_json({'ok': ok})
-
-        except Exception:
-            log_error('[ADMIN API] Exception while handling request', exc_info=True)
-            return self.send_json({'error': 'internal'}, status=500)
-
-        # Not found
-        return self.send_json({'error': 'not_found'}, status=404)
-
-    def _render_admin_panel(self, user: Dict, page_key: str) -> str:
-        """Render a specific admin sub-page."""
-        template = ADMIN_PAGE_TEMPLATES.get(page_key) or ""
-        if not template:
-            return "<html><body><h1>Admin panel</h1><p>Template not loaded</p></body></html>"
-        return template.replace("{ADMIN_USERNAME}", user['username'])
-
+        core_handle_admin_api(
+            self,
+            log_error=log_error,
+            get_dashboard_metrics=_get_dashboard_metrics,
+            projects=PROJECTS,
+        )
 
     def do_GET(self):
         self.handle_proxy()
