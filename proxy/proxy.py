@@ -22,6 +22,24 @@ from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
 
+from core.templates import (
+    ADMIN_PAGE_FILES,
+    ADMIN_PAGE_TEMPLATES,
+    ADMIN_ROUTE_TO_TEMPLATE,
+    ERROR_TEMPLATE,
+    ERROR_TEMPLATE_PATH,
+    LOGIN_TEMPLATE,
+    PASSWORD_TEMPLATE,
+    PASSWORD_TEMPLATE_PATH,
+    REGISTER_PENDING_TEMPLATE,
+    REGISTER_TEMPLATE,
+    TWO_FA_CHALLENGE_TEMPLATE,
+    TWO_FA_CHALLENGE_TEMPLATE_PATH,
+    TWO_FA_SETUP_TEMPLATE,
+    TWO_FA_SETUP_TEMPLATE_PATH,
+    USER_PANEL_TEMPLATE,
+)
+
 from db import (
     get_user_by_id, get_user_by_username, get_session, update_session_activity,
     verify_password, create_session, user_has_permission,
@@ -44,7 +62,6 @@ load_dotenv()
 
 ROOT_DOMAIN = os.getenv("ROOT_DOMAIN", "ppowicz.pl")
 PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT", "/home/ppowicz/projects"))
-ERROR_TEMPLATE_PATH = Path(os.getenv("ERROR_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/error.html"))
 LOG_FILE_PATH = Path(os.getenv("LOG_FILE_PATH", "/home/ppowicz/proxy/proxy.log"))
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "90"))
 LOG_CLEANUP_INTERVAL_SECONDS = int(os.getenv("LOG_CLEANUP_INTERVAL_SECONDS", str(6 * 60 * 60)))
@@ -450,140 +467,6 @@ BROKEN_PROJECTS: Dict[str, str] = {}
 LAST_SCAN: float = 0.0
 LAST_LOG_CLEANUP: float = 0.0
 
-# ====== ERROR TEMPLATE ======
-
-def load_error_template() -> str:
-    if ERROR_TEMPLATE_PATH.is_file():
-        try:
-            return ERROR_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read error template at {ERROR_TEMPLATE_PATH}: {exc}")
-    return None  # Will use inline default if not found
-
-ERROR_TEMPLATE = load_error_template()
-
-# ====== PASSWORD TEMPLATE ======
-PASSWORD_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/password.html")
-
-def load_password_template() -> Optional[str]:
-    if PASSWORD_TEMPLATE_PATH.is_file():
-        try:
-            return PASSWORD_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read password template at {PASSWORD_TEMPLATE_PATH}: {exc}")
-    return None  # Return None if not found (will show 404)
-
-PASSWORD_TEMPLATE = load_password_template()
-
-# ====== LOGIN TEMPLATE ======
-LOGIN_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/login.html")
-
-def load_login_template() -> str:
-    if LOGIN_TEMPLATE_PATH.is_file():
-        try:
-            return LOGIN_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read login template at {LOGIN_TEMPLATE_PATH}: {exc}")
-    return ""  # Fallback to simple form if template not found
-
-LOGIN_TEMPLATE = load_login_template()
-
-REGISTER_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/register.html")
-
-def load_register_template() -> str:
-    if REGISTER_TEMPLATE_PATH.is_file():
-        try:
-            return REGISTER_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read register template at {REGISTER_TEMPLATE_PATH}: {exc}")
-    return ""
-
-REGISTER_TEMPLATE = load_register_template()
-
-REGISTER_PENDING_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/register_pending.html")
-
-def load_register_pending_template() -> str:
-    if REGISTER_PENDING_TEMPLATE_PATH.is_file():
-        try:
-            return REGISTER_PENDING_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read register pending template at {REGISTER_PENDING_TEMPLATE_PATH}: {exc}")
-    return ""
-
-REGISTER_PENDING_TEMPLATE = load_register_pending_template()
-
-# ====== USER PANEL TEMPLATE ======
-USER_PANEL_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/user_panel.html")
-
-def load_user_panel_template() -> str:
-    if USER_PANEL_TEMPLATE_PATH.is_file():
-        try:
-            return USER_PANEL_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read user panel template at {USER_PANEL_TEMPLATE_PATH}: {exc}")
-    return ""  # Fallback to simple panel if template not found
-
-USER_PANEL_TEMPLATE = load_user_panel_template()
-
-# ====== ADMIN PAGE TEMPLATES ======
-ADMIN_PAGE_FILES = {
-    'home': Path("/home/ppowicz/proxy/sites/admin_home.html"),
-    'db': Path("/home/ppowicz/proxy/sites/admin_db.html"),
-    'logs': Path("/home/ppowicz/proxy/sites/admin_logs.html"),
-    'users': Path("/home/ppowicz/proxy/sites/admin_users.html"),
-    'roles': Path("/home/ppowicz/proxy/sites/admin_roles.html"),
-}
-
-def load_admin_page_templates() -> Dict[str, str]:
-    templates: Dict[str, str] = {}
-    for key, path in ADMIN_PAGE_FILES.items():
-        if path.is_file():
-            try:
-                templates[key] = path.read_text(encoding="utf-8")
-            except Exception as exc:
-                log_error(f"[FILE] Failed to read admin template '{key}' at {path}: {exc}")
-                templates[key] = ""
-        else:
-            templates[key] = ""
-    return templates
-
-ADMIN_PAGE_TEMPLATES = load_admin_page_templates()
-
-ADMIN_ROUTE_TO_TEMPLATE = {
-    '/': 'home',
-    '': 'home',
-    '/db': 'db',
-    '/logs': 'logs',
-    '/users': 'users',
-    '/roles': 'roles',
-}
-
-# ====== 2FA TEMPLATES ======
-
-TWO_FA_SETUP_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/2fa_setup.html")
-
-def load_2fa_setup_template() -> str:
-    if TWO_FA_SETUP_TEMPLATE_PATH.is_file():
-        try:
-            return TWO_FA_SETUP_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read 2FA setup template at {TWO_FA_SETUP_TEMPLATE_PATH}: {exc}")
-    return ""  # Fallback to inline if template not found
-
-TWO_FA_SETUP_TEMPLATE = load_2fa_setup_template()
-
-TWO_FA_CHALLENGE_TEMPLATE_PATH = Path("/home/ppowicz/proxy/sites/2fa_challenge.html")
-
-def load_2fa_challenge_template() -> str:
-    if TWO_FA_CHALLENGE_TEMPLATE_PATH.is_file():
-        try:
-            return TWO_FA_CHALLENGE_TEMPLATE_PATH.read_text(encoding="utf-8")
-        except Exception as exc:
-            log_error(f"[FILE] Failed to read 2FA challenge template at {TWO_FA_CHALLENGE_TEMPLATE_PATH}: {exc}")
-    return ""  # Fallback to inline if template not found
-
-TWO_FA_CHALLENGE_TEMPLATE = load_2fa_challenge_template()
-
 def render_error_page(key: str) -> Tuple[int, str]:
     msg = ERROR_MESSAGES.get(key) or ERROR_MESSAGES["500"]
     status_code = int(key) if key.isdigit() else 500
@@ -724,16 +607,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def send_error_page(self, key: str, *, log_request: bool = True, error_message: Optional[str] = None):
         status_code, html = render_error_page(key)
         log_error(f"[HTTP] {status_code} response for {self.command} {self.path}")
-        body = html.encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        err_text = None
         if log_request:
             msg = ERROR_MESSAGES.get(key) or {}
             err_text = error_message or msg.get("TITLE") or "Error"
-            self._log_simple_response(status_code, len(body), is_error=True, error_message=err_text)
+        self._send_html_response(
+            status_code,
+            html,
+            log_request=log_request,
+            is_error=True,
+            error_message=err_text,
+        )
 
     def get_subdomain(self) -> Optional[str]:
         host = self.headers.get("Host", "")
@@ -805,13 +689,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._clear_cookie("pending_session")
 
     def _send_rate_limited(self, message: str):
-        body = f"<html><head><title>Too Many Attempts</title></head><body><h1>429 Too Many Requests</h1><p>{message}</p></body></html>".encode("utf-8")
-        self.send_response(429)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-        self._log_simple_response(429, len(body), is_error=True, error_message=message)
+        html = f"<html><head><title>Too Many Attempts</title></head><body><h1>429 Too Many Requests</h1><p>{message}</p></body></html>"
+        self._send_html_response(429, html, error_message=message)
 
     def _check_rate_limit(self, bucket: str, key: str, limit: int, window_seconds: int, message: str) -> bool:
         if limit <= 0 or window_seconds <= 0:
@@ -959,6 +838,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
             error_message=error_message
         )
 
+    def _send_html_response(
+        self,
+        status: int,
+        html: str,
+        *,
+        content_type: str = "text/html; charset=utf-8",
+        headers: Optional[Dict[str, str]] = None,
+        log_request: bool = True,
+        is_error: Optional[bool] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Write HTML content with common headers and optional logging."""
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if headers:
+            for key, value in headers.items():
+                self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+        if log_request:
+            effective_error = is_error if is_error is not None else status >= 400
+            self._log_simple_response(status, len(body), is_error=effective_error, error_message=error_message)
+
     def send_password_page(self, message: str = ""):
         if not PASSWORD_TEMPLATE:
             # Password template not found, show 404
@@ -970,13 +874,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             .replace("{TAB_TITLE}", "Wprowadź hasło")
             .replace("{MESSAGE}", message or "")
         )
-        body = html.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-        self._log_simple_response(200, len(body), is_error=bool(message), error_message=message or None)
+        self._send_html_response(
+            200,
+            html,
+            is_error=bool(message),
+            error_message=message or None,
+        )
 
     def handle_proxy(self):
         try:
@@ -1205,12 +1108,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             )
                         else:
                             html = f"<html><body><h1>{status}</h1><p>{reason}</p></body></html>"
-                        body = html.encode("utf-8")
-                        self.send_response(status)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.send_header("Content-Length", str(len(body)))
-                        self.end_headers()
-                        self.wfile.write(body)
+                        self._send_html_response(status, html, error_message=reason or str(status))
                 else:
                     # Forward successful response
                     self.send_response(status, reason)
@@ -1324,12 +1222,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             pending_user = get_user_by_username(username) if username else None
             if pending_user and not pending_user.get('is_active'):
                 html = self._render_login_form("Twoje konto czeka na zatwierdzenie przez administratora.", next_url)
-                body = html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_html_response(200, html, is_error=False)
                 return
 
             if username and password:
@@ -1376,12 +1269,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             
             # Failed login — show form with error and preserve next parameter
             html = self._render_login_form("Nieprawidłowe dane logowania", next_url)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowe dane logowania")
         else:
             # GET — if user is already logged in, redirect to panel
             user = self.get_session_user()
@@ -1393,12 +1281,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
             # otherwise show login form with next parameter
             html = self._render_login_form("", next_url)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=False)
     
     def handle_register(self):
         """Handle /register page for creating accounts."""
@@ -1442,32 +1325,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
             if error:
                 html = self._render_register_form(error, next_url)
-                body = html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_html_response(200, html, is_error=True, error_message=error)
                 return
 
             user_id = create_user(username, email, password)
             if not user_id:
                 html = self._render_register_form("Nazwa użytkownika lub email jest już zajęty.", next_url)
-                body = html.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_html_response(200, html, is_error=True, error_message="Nazwa użytkownika lub email jest już zajęty.")
                 return
 
             html = self._render_register_pending()
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=False)
         else:
             user = self.get_session_user()
             if user:
@@ -1477,12 +1345,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
 
             html = self._render_register_form("", next_url)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=False)
 
     def _render_login_form(self, error: str = "", next_url: str = "") -> str:
         """Render login form HTML from template."""
@@ -1659,12 +1522,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         
         # Show user panel (list of accessible projects)
         html = self._render_user_panel(user)
-        body = html.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_html_response(200, html, is_error=False)
     
     def _render_user_panel(self, user: Dict) -> str:
         """Render user panel HTML from template."""
@@ -1805,22 +1663,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         qr_data_uri = ""
                     
                     html = self._render_2fa_setup_form("Nieprawidłowy kod", next_url, qr_data_uri, state.get('temp_totp_secret', ''))
-                    body = html.encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowy kod")
                     return
             
             # No code or invalid state, show form again with error
             html = self._render_2fa_setup_form("Brak kodu weryfikacyjnego", next_url, "", state.get('temp_totp_secret', ''))
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=True, error_message="Brak kodu weryfikacyjnego")
         else:
             # GET — show 2FA setup form with QR code
             temp_secret = state.get('temp_totp_secret', '')
@@ -1831,12 +1679,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if not secret_result:
                     # Failed to create secret, show error
                     html = self._render_2fa_setup_form("Nie udało się wygenerować kodu QR", next_url, "", "")
-                    body = html.encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._send_html_response(200, html, is_error=True, error_message="Nie udało się wygenerować kodu QR")
                     return
                 
                 temp_secret, qr_data_uri = secret_result
@@ -1873,12 +1716,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     qr_data_uri = ""
             
             html = self._render_2fa_setup_form("", next_url, qr_data_uri, temp_secret)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=False)
     
     def handle_2fa_challenge(self):
         """Handle /login/2fa — verify TOTP code for login."""
@@ -1940,21 +1778,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             
             # Code is invalid or empty, show form again with error
             html = self._render_2fa_challenge_form("Nieprawidłowy kod", next_url)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowy kod")
         else:
             # GET — show 2FA challenge form
             html = self._render_2fa_challenge_form("", next_url)
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html_response(200, html, is_error=False)
         
     def handle_skip_2fa_setup(self):
         """Handle /login/skip-2fa-setup — skip 2FA setup and complete login."""
@@ -2017,12 +1845,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Show admin interface
         html = self._render_admin_panel(user, page_key)
-        body = html.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_html_response(200, html, is_error=False)
     
     def send_json(self, obj, status: int = 200):
         """Send JSON response."""
