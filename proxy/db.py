@@ -6,6 +6,7 @@ Uses PostgreSQL with psycopg2.
 
 import os
 import base64
+import fnmatch
 import hashlib
 import json
 import traceback
@@ -460,10 +461,16 @@ def user_has_permission(user_id: int, permission_code: str) -> bool:
     """Check if user has specific permission. Admin (*) has all permissions."""
     perms = get_user_permissions(user_id)
     for p in perms:
-        if p['code'] == "*":  # Admin permission
+        code = (p.get('code') or "").strip()
+        if not code:
+            continue
+        if code == "*":  # Admin permission
             return True
-        if p['code'] == permission_code:
+        if code == permission_code:
             return True
+        if "*" in code or "?" in code:
+            if fnmatch.fnmatchcase(permission_code, code):
+                return True
     return False
 
 def user_is_admin(user_id: int) -> bool:
