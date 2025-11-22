@@ -1,9 +1,12 @@
 import http.client
 import json
+import logging
+import os
 import time
 from typing import Any, Callable, Dict, Mapping
 from urllib.parse import parse_qs
 
+from core.email import render_email_template, send_email
 from core.templates import ADMIN_PAGE_TEMPLATES, ADMIN_ROUTE_TO_TEMPLATE
 from db import (
     DBConnection,
@@ -31,11 +34,15 @@ from db import (
     get_top_http_paths,
     get_top_http_subdomains,
     get_user_roles,
+    get_user_by_id,
     update_role,
     update_table_row,
     update_user,
     user_is_admin,
 )
+
+LOGGER = logging.getLogger("proxy.admin")
+LOGIN_URL = os.getenv("LOGIN_URL", "https://ppowicz.pl/login")
 
 
 def _parse_query(qs: str) -> Dict[str, str]:
@@ -53,6 +60,32 @@ def _read_json_body(handler: Any) -> Dict[str, Any]:
         return json.loads(body.decode('utf-8') or '{}')
     except Exception:
         return {}
+
+
+def _notify_user_activation(user: Mapping[str, Any]) -> None:
+    email = user.get('email') if isinstance(user, Mapping) else None
+    if not email:
+        return
+
+    username = user.get('username') or 'there'
+    subject = 'Your ppowicz.pl account is active'
+    body_text = (
+        f"Hi {username},\n\n"
+        "An administrator has approved your ppowicz.pl account, so you can now sign in at "
+        f"{LOGIN_URL}.\n\nRegards,\nppowicz.pl"
+    )
+    body_html = render_email_template(
+        "account_activation",
+        {
+            "username": username,
+            "login_url": LOGIN_URL,
+        },
+    ) or None
+
+    if send_email(subject=subject, body_text=body_text, body_html=body_html, recipients=[email]):
+        LOGGER.info("[ADMIN] Activation email sent to user_id=%s", user.get('id'))
+    else:
+        LOGGER.warning("[ADMIN] Failed to send activation email to user_id=%s", user.get('id'))
 
 
 def render_admin_panel(user: Dict[str, Any], page_key: str) -> str:
@@ -203,8 +236,15 @@ def handle_admin_api(
             is_active = data.get('is_active')
             if user_id is None or is_active is None:
                 return handler.send_json({'ok': False})
+            try:
+                user_id_value = int(user_id)
+            except (TypeError, ValueError):
+                return handler.send_json({'ok': False, 'error': 'invalid_user_id'}, status=400)
             active_flag = bool(is_active) if isinstance(is_active, bool) else str(is_active).lower() in ('1', 'true', 'yes')
-            ok = update_user(user_id, is_active=active_flag)
+            user_before = get_user_by_id(user_id_value)
+            ok = update_user(user_id_value, is_active=active_flag)
+            if ok and user_before and not user_before.get('is_active') and active_flag:
+                _notify_user_activation(user_before)
             return handler.send_json({'ok': bool(ok)})
 
         if handler.command == 'POST' and path_only == 'users/delete':

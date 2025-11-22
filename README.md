@@ -95,6 +95,15 @@ Kluczowe biblioteki: `psycopg2-binary`, `argon2-cffi`, `cryptography`, `python-d
 | `TOTP_SECRET_KEY` | – | Klucz Fernet do szyfrowania sekretów TOTP. |
 | `LOG_RETENTION_DAYS` | `90` | Retencja logów w plikach i bazie. |
 | `SCAN_INTERVAL_SECONDS` | `5` | Kadencja ponownego wczytania konfiguracji projektów. |
+| `SMTP_HOST` | `localhost` | Adres serwera SMTP wykorzystywanego do wysyłki maili z core. |
+| `SMTP_PORT` | `25` | Port serwera SMTP (`587` dla STARTTLS, `465` dla SMTPS). |
+| `SMTP_USERNAME` | – | Opcjonalny login do serwera SMTP. |
+| `SMTP_PASSWORD` | – | Opcjonalne hasło do serwera SMTP. |
+| `SMTP_SENDER` | `no-reply@localhost` | Domyślny nagłówek `From` wykorzystywany przez helper mailowy. |
+| `SMTP_USE_TLS` | `true` | Włącza STARTTLS na zwykłym połączeniu SMTP. |
+| `SMTP_USE_SSL` | `false` | Wymusza połączenie SMTPS (nie należy łączyć z `SMTP_USE_TLS`). |
+| `SMTP_TIMEOUT` | `10` | Limit czasu (sekundy) dla operacji SMTP. |
+| `EMAIL_TEMPLATES_DIR` | `proxy/emails` | Katalog z szablonami HTML wykorzystywanymi przy wysyłce e-maili. |
 
 Pełną listę należy analizować w `proxy/proxy.py` i `proxy/db.py`.
 
@@ -105,6 +114,12 @@ python3 proxy/proxy.py
 ```
 
 Domyślne nasłuchiwanie: `0.0.0.0:443` z certyfikatami Let’s Encrypt (`/etc/letsencrypt/live/ppowicz.pl/...`).
+
+---
+
+### 6.4. Powiadomienia e-mail
+
+Core udostępnia teraz moduł `proxy/core/email.py` z funkcjami `get_smtp_settings`, `build_email_message` i `send_email`. Moduł korzysta z powyższych zmiennych środowiskowych (`SMTP_*`) do zestawienia połączenia SMTP/SMTPS i obsługuje zarówno zwykłe wiadomości tekstowe, jak i wariant z treścią HTML. Dzięki temu pozostałe komponenty mogą wysyłać powiadomienia bez ręcznego zarządzania połączeniem.
 
 ---
 
