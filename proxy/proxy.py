@@ -43,6 +43,11 @@ from core.templates import (
     TWO_FA_SETUP_TEMPLATE_PATH,
     USER_PANEL_TEMPLATE,
 )
+from core.twofa import (
+    handle_2fa_challenge as core_handle_2fa_challenge,
+    handle_2fa_setup as core_handle_2fa_setup,
+    handle_skip_2fa_setup as core_handle_skip_2fa_setup,
+)
 
 from db import (
     get_user_by_id, get_user_by_username, get_session, update_session_activity,
@@ -897,13 +902,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     self.handle_register()
                     return
                 elif self.path == "/login/setup-2fa" or self.path.startswith("/login/setup-2fa?"):
-                    self.handle_2fa_setup()
+                    core_handle_2fa_setup(
+                        self,
+                        rate_limit_per_session=TWO_FA_RATE_LIMIT_PER_SESSION,
+                        rate_limit_window_seconds=TWO_FA_RATE_LIMIT_WINDOW_SECONDS,
+                    )
                     return
                 elif self.path == "/login/2fa" or self.path.startswith("/login/2fa?"):
-                    self.handle_2fa_challenge()
+                    core_handle_2fa_challenge(self)
                     return
                 elif self.path == "/login/skip-2fa-setup" or self.path.startswith("/login/skip-2fa-setup?"):
-                    self.handle_skip_2fa_setup()
+                    core_handle_skip_2fa_setup(self)
                     return
                 elif self.path == "/panel" or self.path.startswith("/panel?"):
                     self.handle_user_panel()
@@ -1399,104 +1408,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 </body>
 </html>"""
 
-    def _render_2fa_setup_form(self, error: str = "", next_url: str = "", qr_data_uri: str = "", secret: str = "") -> str:
-        """Render 2FA setup form with QR code."""
-        next_url_escaped = next_url.replace('"', '&quot;').replace("'", '&#39;')
-        
-        if TWO_FA_SETUP_TEMPLATE:
-            html = TWO_FA_SETUP_TEMPLATE.replace("{NEXT_URL}", next_url_escaped)
-            html = html.replace("{ERROR_MESSAGE}", f'<div class="error">{error}</div>' if error else "")
-            html = html.replace("{QR_CODE}", f'<img src="{qr_data_uri}" alt="QR Code">' if qr_data_uri else "")
-            html = html.replace("{SECRET_KEY}", secret or "")
-            return html
-        
-        # Fallback to simple form if no template
-        html = f"""<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="utf-8">
-    <title>Konfiguracja 2FA</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; padding: 40px; }}
-        .container {{ max-width: 600px; margin: 0 auto; }}
-        .error {{ color: #ff8080; margin-bottom: 20px; }}
-        .qr-code {{ margin: 20px 0; text-align: center; }}
-        .qr-code img {{ max-width: 300px; }}
-        .secret {{ background: #f0f0f0; padding: 10px; margin: 20px 0; font-family: monospace; word-break: break-all; }}
-        .form-group {{ margin: 20px 0; }}
-        input {{ padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }}
-        button {{ padding: 10px 20px; margin-right: 10px; cursor: pointer; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Konfiguracja uwierzytelniania dwuetapowego</h1>
-        {f'<div class="error">{error}</div>' if error else ''}
-        
-        <p>Aby włączyć uwierzytelnianie dwuetapowe, zeskanuj kod QR za pomocą aplikacji takiej jak Google Authenticator lub Microsoft Authenticator.</p>
-        
-        {'<div class="qr-code"><img src="' + qr_data_uri + '" alt="QR Code"></div>' if qr_data_uri else ''}
-        
-        {'<div><p><strong>Jeśli nie możesz zeskanować kodu QR, wpisz ręcznie:</strong></p><div class="secret">' + secret + '</div></div>' if secret else ''}
-        
-        <form method="post">
-            <input type="hidden" name="next" value="{next_url_escaped}" />
-            <div class="form-group">
-                <label>Wpisz 6-cyfrowy kod z aplikacji:</label>
-                <input type="text" name="code" placeholder="000000" maxlength="6" autofocus required />
-            </div>
-            <div>
-                <button type="submit">Aktywuj 2FA</button>
-                <a href="/login/skip-2fa-setup"><button type="button">Pomiń na razie</button></a>
-            </div>
-        </form>
-    </div>
-</body>
-</html>"""
-        return html
     
-    def _render_2fa_challenge_form(self, error: str = "", next_url: str = "") -> str:
-        """Render 2FA challenge form."""
-        next_url_escaped = next_url.replace('"', '&quot;').replace("'", '&#39;')
-        
-        if TWO_FA_CHALLENGE_TEMPLATE:
-            html = TWO_FA_CHALLENGE_TEMPLATE.replace("{NEXT_URL}", next_url_escaped)
-            html = html.replace("{ERROR_MESSAGE}", f'<div class="error">{error}</div>' if error else "")
-            return html
-        
-        # Fallback to simple form if no template
-        html = f"""<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="utf-8">
-    <title>Weryfikacja 2FA</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; padding: 40px; }}
-        .container {{ max-width: 600px; margin: 0 auto; }}
-        .error {{ color: #ff8080; margin-bottom: 20px; }}
-        .form-group {{ margin: 20px 0; }}
-        input {{ padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }}
-        button {{ padding: 10px 20px; cursor: pointer; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Weryfikacja uwierzytelniania dwuetapowego</h1>
-        {f'<div class="error">{error}</div>' if error else ''}
-        
-        <p>Wpisz 6-cyfrowy kod z aplikacji do uwierzytelniania:</p>
-        
-        <form method="post">
-            <input type="hidden" name="next" value="{next_url_escaped}" />
-            <div class="form-group">
-                <input type="text" name="code" placeholder="000000" maxlength="6" autofocus required />
-            </div>
-            <button type="submit">Weryfikuj</button>
-        </form>
-    </div>
-</body>
-</html>"""
-        return html
     
     def handle_user_panel(self):
         """Handle /panel page for logged-in user."""
@@ -1555,258 +1467,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._clear_cookie("pending_session")
         self.end_headers()
     
-    def handle_2fa_setup(self):
-        """Handle /login/setup-2fa — prompt user to set up TOTP or skip."""
-        # Extract 'next' parameter from query string
-        next_url = ""
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-            next_url = params.get("next", "")
-        
-        # Get session (pending or fully verified)
-        session_id = self._get_pending_or_active_session_id()
-        session = get_session(session_id) if session_id else None
-        
-        if not session:
-            # No session, redirect to login
-            self.send_response(302)
-            self.send_header("Location", "https://ppowicz.pl/login")
-            self.end_headers()
-            return
-        
-        user_id = session.get('user_id')
-        state = get_session_2fa_state(session_id)
-        
-        if not state or not state.get('2fa_setup_pending'):
-            # Not in setup pending state, redirect to panel
-            self.send_response(302)
-            self.send_header("Location", "/panel")
-            self.end_headers()
-            return
-        
-        if self.command == "POST":
-            content_length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(content_length) if content_length > 0 else b""
-            
-            totp_code = ""
-            try:
-                data = parse_qs(body.decode("utf-8", errors="ignore"))
-                totp_code = data.get("code", [""])[0]
-            except Exception:
-                pass
-
-            if not self._check_rate_limit(
-                "2fa-session", session_id, TWO_FA_RATE_LIMIT_PER_SESSION, TWO_FA_RATE_LIMIT_WINDOW_SECONDS,
-                "Zbyt wiele nieudanych prób kodu 2FA. Spróbuj ponownie później."
-            ):
-                return
-            
-            if totp_code and state.get('temp_totp_secret'):
-                # Verify code against the temporary secret
-                if verify_and_enable_totp(user_id, totp_code, state['temp_totp_secret']):
-                    # Code is valid, TOTP is now enabled
-                    # Mark session as verified and clear temp secret
-                    update_session_2fa_state(session_id, {
-                        "2fa_pending": False,
-                        "2fa_verified": True,
-                        "2fa_setup_pending": False,
-                        "temp_totp_secret": ""
-                    })
-                    
-                    # Redirect to the original next URL
-                    redirect_url = state.get('original_next', "/panel")
-                    self.send_response(302)
-                    self.send_header("Location", redirect_url)
-                    self._promote_session(session_id)
-                    self.end_headers()
-                    return
-                else:
-                    # Code is invalid - regenerate QR code from temp secret
-                    try:
-                        import pyotp
-                        import qrcode
-                        from io import BytesIO
-                        import base64
-                        
-                        user = get_user_by_id(user_id)
-                        temp_secret = state.get('temp_totp_secret', '')
-                        totp = pyotp.TOTP(temp_secret)
-                        uri = totp.provisioning_uri(
-                            name=user['username'],
-                            issuer_name='ppowicz.pl'
-                        )
-                        
-                        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                        qr.add_data(uri)
-                        qr.make(fit=True)
-                        
-                        img = qr.make_image(fill_color="white", back_color="transparent")
-                        buffered = BytesIO()
-                        img.save(buffered, format="PNG")
-                        img_data = base64.b64encode(buffered.getvalue()).decode()
-                        qr_data_uri = f"data:image/png;base64,{img_data}"
-                    except Exception as e:
-                        log_error(f"[2FA] Failed to regenerate QR on invalid code: {e}")
-                        qr_data_uri = ""
-                    
-                    html = self._render_2fa_setup_form("Nieprawidłowy kod", next_url, qr_data_uri, state.get('temp_totp_secret', ''))
-                    self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowy kod")
-                    return
-            
-            # No code or invalid state, show form again with error
-            html = self._render_2fa_setup_form("Brak kodu weryfikacyjnego", next_url, "", state.get('temp_totp_secret', ''))
-            self._send_html_response(200, html, is_error=True, error_message="Brak kodu weryfikacyjnego")
-        else:
-            # GET — show 2FA setup form with QR code
-            temp_secret = state.get('temp_totp_secret', '')
-            
-            # If no temp secret in state, generate new one
-            if not temp_secret:
-                secret_result = create_totp_secret(user_id)
-                if not secret_result:
-                    # Failed to create secret, show error
-                    html = self._render_2fa_setup_form("Nie udało się wygenerować kodu QR", next_url, "", "")
-                    self._send_html_response(200, html, is_error=True, error_message="Nie udało się wygenerować kodu QR")
-                    return
-                
-                temp_secret, qr_data_uri = secret_result
-                # Store temp secret in session
-                update_session_2fa_state(session_id, {
-                    "temp_totp_secret": temp_secret
-                })
-            else:
-                # Regenerate QR code from stored secret
-                try:
-                    import pyotp
-                    import qrcode
-                    from io import BytesIO
-                    import base64
-                    
-                    user = get_user_by_id(user_id)
-                    totp = pyotp.TOTP(temp_secret)
-                    uri = totp.provisioning_uri(
-                        name=user['username'],
-                        issuer_name='ppowicz.pl'
-                    )
-                    
-                    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                    qr.add_data(uri)
-                    qr.make(fit=True)
-                    
-                    img = qr.make_image(fill_color="white", back_color="transparent")
-                    buffered = BytesIO()
-                    img.save(buffered, format="PNG")
-                    img_data = base64.b64encode(buffered.getvalue()).decode()
-                    qr_data_uri = f"data:image/png;base64,{img_data}"
-                except Exception as e:
-                    log_error(f"[2FA] Failed to regenerate QR: {e}")
-                    qr_data_uri = ""
-            
-            html = self._render_2fa_setup_form("", next_url, qr_data_uri, temp_secret)
-            self._send_html_response(200, html, is_error=False)
     
-    def handle_2fa_challenge(self):
-        """Handle /login/2fa — verify TOTP code for login."""
-        # Extract 'next' parameter from query string
-        next_url = ""
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-            next_url = params.get("next", "")
         
-        # Get session
-        session_id = self._get_pending_or_active_session_id()
-        session = get_session(session_id) if session_id else None
-        
-        if not session:
-            # No session, redirect to login
-            self.send_response(302)
-            self.send_header("Location", "https://ppowicz.pl/login")
-            self.end_headers()
-            return
-        
-        user_id = session.get('user_id')
-        state = get_session_2fa_state(session_id)
-        
-        if not state or not state.get('2fa_pending'):
-            # Session is not in 2FA pending state, redirect to panel
-            self.send_response(302)
-            self.send_header("Location", "/panel")
-            self.end_headers()
-            return
-        
-        if self.command == "POST":
-            content_length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(content_length) if content_length > 0 else b""
-            
-            totp_code = ""
-            try:
-                data = parse_qs(body.decode("utf-8", errors="ignore"))
-                totp_code = data.get("code", [""])[0]
-            except Exception:
-                pass
-            
-            if totp_code:
-                # Verify TOTP code
-                if verify_totp_code(user_id, totp_code):
-                    # Code is valid, mark session as verified
-                    update_session_2fa_state(session_id, {
-                        "2fa_pending": False,
-                        "2fa_verified": True
-                    })
-                    
-                    # Redirect to original next URL
-                    redirect_url = state.get('original_next', "/panel")
-                    self.send_response(302)
-                    self.send_header("Location", redirect_url)
-                    self._promote_session(session_id)
-                    self.end_headers()
-                    return
-            
-            # Code is invalid or empty, show form again with error
-            html = self._render_2fa_challenge_form("Nieprawidłowy kod", next_url)
-            self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowy kod")
-        else:
-            # GET — show 2FA challenge form
-            html = self._render_2fa_challenge_form("", next_url)
-            self._send_html_response(200, html, is_error=False)
-        
-    def handle_skip_2fa_setup(self):
-        """Handle /login/skip-2fa-setup — skip 2FA setup and complete login."""
-        # Get session
-        session_id = self._get_pending_or_active_session_id()
-        session = get_session(session_id) if session_id else None
-        
-        if not session:
-            # No session, redirect to login
-            self.send_response(302)
-            self.send_header("Location", "https://ppowicz.pl/login")
-            self.end_headers()
-            return
-        
-        state = get_session_2fa_state(session_id)
-        
-        if not state or not state.get('2fa_setup_pending'):
-            # Session is not in 2FA setup pending state
-            self.send_response(302)
-            self.send_header("Location", "/panel")
-            self.end_headers()
-            return
-        
-        # Mark session as verified (skip setup)
-        update_session_2fa_state(session_id, {
-            "2fa_setup_pending": False,
-            "2fa_verified": True
-        })
-        
-        # Redirect to original next URL
-        redirect_url = state.get('original_next', "/panel")
-        self.send_response(302)
-        self.send_header("Location", redirect_url)
-        self._promote_session(session_id)
-        self.end_headers()
-    
     def handle_admin_panel(self):
         """Handle admin panel at admin.ppowicz.pl."""
         core_handle_admin_panel(self)
