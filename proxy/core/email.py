@@ -10,10 +10,27 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 
 from dotenv import load_dotenv
 
+from core.logging import get_logger
+
 load_dotenv()
 
-LOGGER = logging.getLogger("proxy.email")
+LOGGER = get_logger("proxy.email")
 EMAIL_TEMPLATES_DIR = Path(os.getenv("EMAIL_TEMPLATES_DIR") or (Path(__file__).resolve().parent.parent / "emails"))
+EMAIL_LOG_PATH = Path(os.getenv("EMAIL_LOG_PATH") or (Path(__file__).resolve().parent.parent / "email.log"))
+
+
+def _ensure_email_log_handler() -> None:
+    if any(getattr(handler, "__email_log_handler__", False) for handler in LOGGER.handlers):
+        return
+    EMAIL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(EMAIL_LOG_PATH, encoding="utf-8")
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    handler.__email_log_handler__ = True  # type: ignore[attr-defined]
+    LOGGER.addHandler(handler)
+
+
+_ensure_email_log_handler()
 
 
 @dataclass(frozen=True)

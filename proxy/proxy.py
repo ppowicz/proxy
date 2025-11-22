@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import http.client
 import json
-import logging
 import os
 import secrets
 import shutil
@@ -26,6 +25,7 @@ from core.admin import (
     handle_admin_api as core_handle_admin_api,
     handle_admin_panel as core_handle_admin_panel,
 )
+from core.logging import get_logger
 from core.templates import (
     ADMIN_PAGE_FILES,
     ADMIN_PAGE_TEMPLATES,
@@ -66,7 +66,11 @@ load_dotenv()
 
 ROOT_DOMAIN = os.getenv("ROOT_DOMAIN", "ppowicz.pl")
 PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT", "/home/ppowicz/projects"))
-LOG_FILE_PATH = Path(os.getenv("LOG_FILE_PATH", "/home/ppowicz/proxy/proxy.log"))
+LOG_FILE_PATH = Path(
+    os.getenv("LOG_FILE_PATH")
+    or os.getenv("LOGGING_PATH", "")
+    or "/home/ppowicz/proxy/proxy.log"
+)
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "90"))
 LOG_CLEANUP_INTERVAL_SECONDS = int(os.getenv("LOG_CLEANUP_INTERVAL_SECONDS", str(6 * 60 * 60)))
 SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", ".ppowicz.pl")
@@ -87,27 +91,7 @@ REGISTER_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("REGISTER_RATE_LIMIT_WINDOW_S
 HTTP_BODY_LOG_BYTES = int(os.getenv("HTTP_LOG_BODY_LIMIT_BYTES", str(4 * 1024)))
 
 PROCESS_START_TIME = time.time()
-
-
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("proxy")
-    if logger.handlers:
-        return logger
-
-    logger.setLevel(logging.INFO)
-    try:
-        LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-    handler = logging.FileHandler(str(LOG_FILE_PATH), encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    logger.addHandler(handler)
-    logger.propagate = False
-    return logger
-
-
-LOGGER = setup_logger()
+LOGGER = get_logger("proxy")
 
 
 def log_event(message: str, level: str = "info", console: bool = False, exc_info=False):

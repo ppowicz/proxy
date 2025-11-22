@@ -1,13 +1,13 @@
-import logging
 import os
 from pathlib import Path
 from typing import Dict, Optional
 
 from dotenv import load_dotenv
+from core.logging import get_logger
 
 load_dotenv()
 
-LOGGER = logging.getLogger("proxy.templates")
+LOGGER = get_logger("proxy.templates")
 
 ERROR_TEMPLATE_PATH = Path(os.getenv("ERROR_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/error.html"))
 PASSWORD_TEMPLATE_PATH = Path(os.getenv("PASSWORD_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/password.html"))

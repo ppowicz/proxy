@@ -123,6 +123,19 @@ Core udostępnia teraz moduł `proxy/core/email.py` z funkcjami `get_smtp_settin
 
 ---
 
+### 6.5. Konfiguracja logowania
+
+- Wszystkie moduły korzystają ze wspólnego helpera `core.logging.get_logger`, który uruchamia się leniwie przy pierwszym użyciu.
+- Poziom szczegółowości steruje zmienna `LOGGING_LEVEL`:
+  - `1` – tylko błędy (`ERROR`),
+  - `2` – błędy i ostrzeżenia (`ERROR` + `WARNING`),
+  - `3` – pełne logowanie (`DEBUG`, domyślnie).
+- Lokalizację pliku dziennika definiuje `LOGGING_PATH` (ew. `LOG_FILE_PATH` jako kompatybilny alias). W przypadku braku obu zmiennych używany jest `/home/ppowicz/proxy/proxy.log`.
+- Moduł e-mail (`core/email.py`) dodaje własny handler do pliku `EMAIL_LOG_PATH` (domyślnie `proxy/email.log`), dzięki czemu wysyłka maili ma dedykowany strumień poza głównym logiem.
+- Funkcje pomocnicze w `proxy.py`, `config.py`, `db.py`, `core/admin.py`, `core/templates.py` itp. nie tworzą już osobnych loggerów ani nie wypisują bezpośrednio na stdout – wszystkie wpisy trafiają do wspólnej konfiguracji, więc wystarczy jedna zmiana środowiskowa, by dostosować sposób rejestrowania zdarzeń.
+
+---
+
 ## 7. Interfejs administracyjny i API
 
 - **UI**: `https://admin.ppowicz.pl/` – wymaga uwierzytelnionej sesji admina (`user_is_admin`). Szablony w `proxy/sites/admin_*.html` prezentują statystyki systemowe, logi, użytkowników, role, projekty.

@@ -1,6 +1,5 @@
 import http.client
 import json
-import logging
 import os
 import time
 from typing import Any, Callable, Dict, Mapping
@@ -8,6 +7,7 @@ from urllib.parse import parse_qs
 
 from core.email import render_email_template, send_email
 from core.templates import ADMIN_PAGE_TEMPLATES, ADMIN_ROUTE_TO_TEMPLATE
+from core.logging import get_logger
 from db import (
     DBConnection,
     assign_permission_to_role,
@@ -41,7 +41,7 @@ from db import (
     user_is_admin,
 )
 
-LOGGER = logging.getLogger("proxy.admin")
+LOGGER = get_logger("proxy.admin")
 LOGIN_URL = os.getenv("LOGIN_URL", "https://ppowicz.pl/login")
 
 

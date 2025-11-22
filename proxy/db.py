@@ -9,7 +9,6 @@ import base64
 import fnmatch
 import hashlib
 import json
-import traceback
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -20,6 +19,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
+from core.logging import get_logger
 
 # ====== DATABASE LAYOUT ======
 
@@ -92,6 +92,8 @@ from dotenv import load_dotenv
 # ====== DATABASE CONFIG ======
 load_dotenv()
 
+LOGGER = get_logger("proxy.db")
+
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_NAME = os.getenv("DB_NAME", "proxy")
 DB_USER = os.getenv("DB_USER", "proxy")
@@ -112,7 +114,7 @@ if _TOTP_SECRET_KEY:
     try:
         _FERNET = Fernet(_TOTP_SECRET_KEY)
     except Exception as exc:
-        print(f"[TOTP] Invalid TOTP_SECRET_KEY: {exc}")
+        LOGGER.warning(f"[TOTP] Invalid TOTP_SECRET_KEY: {exc}")
         _FERNET = None
 
 
@@ -139,7 +141,7 @@ def _update_user_password_hash(user_id: int, password_hash: str) -> bool:
                 )
         return True
     except Exception as exc:
-        print(f"[DB ERROR] Failed to store password hash for user {user_id}: {exc}")
+        LOGGER.error(f"[DB ERROR] Failed to store password hash for user {user_id}: {exc}")
         return False
 
 
@@ -166,7 +168,7 @@ def _encrypt_totp_secret(secret: str) -> str:
     try:
         return _FERNET.encrypt(secret.encode()).decode()
     except Exception as exc:
-        print(f"[TOTP] Failed to encrypt secret: {exc}")
+        LOGGER.error(f"[TOTP] Failed to encrypt secret: {exc}")
         return secret
 
 
@@ -182,7 +184,7 @@ def _decrypt_totp_secret(user_id: int, secret: Optional[str]) -> Optional[str]:
         _persist_totp_secret(user_id, secret)
         return secret
     except Exception as exc:
-        print(f"[TOTP] Failed to decrypt secret for user {user_id}: {exc}")
+        LOGGER.error(f"[TOTP] Failed to decrypt secret for user {user_id}: {exc}")
         return None
 
 
@@ -200,7 +202,7 @@ def _persist_totp_secret(user_id: int, plain_secret: str) -> bool:
                 )
         return True
     except Exception as exc:
-        print(f"[DB ERROR] Failed to persist encrypted TOTP secret for user {user_id}: {exc}")
+        LOGGER.error(f"[DB ERROR] Failed to persist encrypted TOTP secret for user {user_id}: {exc}")
         return False
 
 # ====== CONNECTION POOL ======
@@ -221,8 +223,7 @@ class DBConnection:
             )
             return conn
         except Exception as e:
-            print(f"[DB ERROR] Failed to connect to database: {e}")
-            traceback.print_exc()
+            LOGGER.exception(f"[DB ERROR] Failed to connect to database: {e}")
             return None
 
 # ====== USER MANAGEMENT ======
@@ -252,11 +253,10 @@ def create_user(username: str, email: str, password: str) -> Optional[int]:
                 result = cur.fetchone()
                 return result['id'] if result else None
     except psycopg2.IntegrityError:
-        print(f"[DB] Username or email already exists: {username}, {email}")
+        LOGGER.warning(f"[DB] Username or email already exists: {username}, {email}")
         return None
     except Exception as e:
-        print(f"[DB ERROR] Failed to create user: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to create user: {e}")
         return None
 
 def get_user_by_username(username: str) -> Optional[Dict]:
@@ -271,7 +271,7 @@ def get_user_by_username(username: str) -> Optional[Dict]:
                 cur.execute("SELECT * FROM users WHERE username = %s", (username,))
                 return cur.fetchone()
     except Exception as e:
-        print(f"[DB ERROR] Failed to get user: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get user: {e}")
         return None
 
 def get_user_by_id(user_id: int) -> Optional[Dict]:
@@ -286,7 +286,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
                 cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
                 return cur.fetchone()
     except Exception as e:
-        print(f"[DB ERROR] Failed to get user by ID: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get user by ID: {e}")
         return None
 
 def verify_password(username: str, password: str) -> Optional[int]:
@@ -349,8 +349,7 @@ def create_session(user_id: int, ip_address: str, user_agent: str, extra_data: O
                 )
         return session_id
     except Exception as e:
-        print(f"[DB ERROR] Failed to create session: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to create session: {e}")
         return None
 
 def get_session(session_id: str) -> Optional[Dict]:
@@ -371,7 +370,7 @@ def get_session(session_id: str) -> Optional[Dict]:
                 )
                 return cur.fetchone()
     except Exception as e:
-        print(f"[DB ERROR] Failed to get session: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get session: {e}")
         return None
 
 def update_session_activity(session_id: str) -> bool:
@@ -389,7 +388,7 @@ def update_session_activity(session_id: str) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to update session: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to update session: {e}")
         return False
 
 def expire_session(session_id: str) -> bool:
@@ -407,7 +406,7 @@ def expire_session(session_id: str) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to expire session: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to expire session: {e}")
         return False
 
 # ====== PERMISSION & ROLE MANAGEMENT ======
@@ -431,7 +430,7 @@ def get_user_roles(user_id: int) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get user roles: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get user roles: {e}")
         return []
 
 def get_user_permissions(user_id: int) -> List[Dict]:
@@ -454,7 +453,7 @@ def get_user_permissions(user_id: int) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get user permissions: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get user permissions: {e}")
         return []
 
 def user_has_permission(user_id: int, permission_code: str) -> bool:
@@ -491,7 +490,7 @@ def get_all_users() -> List[Dict]:
                 cur.execute("SELECT id, username, email, is_active, created_at, last_login_at, totp_enabled FROM users")
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get all users: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get all users: {e}")
         return []
 
 def get_all_sessions() -> List[Dict]:
@@ -514,7 +513,7 @@ def get_all_sessions() -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get sessions: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get sessions: {e}")
         return []
 
 def get_all_roles() -> List[Dict]:
@@ -529,7 +528,7 @@ def get_all_roles() -> List[Dict]:
                 cur.execute("SELECT * FROM roles")
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get roles: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get roles: {e}")
         return []
 
 def get_all_permissions() -> List[Dict]:
@@ -544,7 +543,7 @@ def get_all_permissions() -> List[Dict]:
                 cur.execute("SELECT * FROM permissions")
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get permissions: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get permissions: {e}")
         return []
 
 def assign_role_to_user(user_id: int, role_id: int) -> bool:
@@ -562,7 +561,7 @@ def assign_role_to_user(user_id: int, role_id: int) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to assign role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to assign role: {e}")
         return False
 
 def deassign_role_from_user(user_id: int, role_id: int) -> bool:
@@ -580,7 +579,7 @@ def deassign_role_from_user(user_id: int, role_id: int) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to deassign role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to deassign role: {e}")
         return False
 
 def delete_user(user_id: int) -> bool:
@@ -598,7 +597,7 @@ def delete_user(user_id: int) -> bool:
                 deleted = cur.rowcount or 0
         return bool(deleted)
     except Exception as e:
-        print(f"[DB ERROR] Failed to delete user: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to delete user: {e}")
         return False
 
 
@@ -611,7 +610,7 @@ def insert_http_log(record: Dict) -> bool:
     """Insert an http_logs record. `record` is a dict with keys matching columns."""
     conn = DBConnection.get_connection()
     if not conn:
-        print(f"[DB LOG] No DB connection available")
+        LOGGER.info(f"[DB LOG] No DB connection available")
         return False
     # prepare identifiers and values
     cols = []
@@ -619,7 +618,7 @@ def insert_http_log(record: Dict) -> bool:
     for k, v in record.items():
         # skip invalid keys
         if not isinstance(k, str) or not k.isidentifier():
-            print(f"[DB LOG] Skipping invalid key: {k}")
+            LOGGER.info(f"[DB LOG] Skipping invalid key: {k}")
             continue
         cols.append(sql.Identifier(k))
         # JSON-serialize dicts
@@ -628,7 +627,7 @@ def insert_http_log(record: Dict) -> bool:
         else:
             vals.append(v)
     if not cols:
-        print(f"[DB LOG] No valid columns in record")
+        LOGGER.info(f"[DB LOG] No valid columns in record")
         return False
     try:
         with conn:
@@ -636,13 +635,12 @@ def insert_http_log(record: Dict) -> bool:
                 col_names = sql.SQL(', ').join(cols)
                 placeholders = sql.SQL(', ').join(sql.Placeholder() * len(vals))
                 query = sql.SQL('INSERT INTO http_logs ({}) VALUES ({})').format(col_names, placeholders)
-                print(f"[DB LOG] Executing: {query.as_string(cur)}")
+                LOGGER.info(f"[DB LOG] Executing: {query.as_string(cur)}")
                 cur.execute(query, vals)
-        print(f"[DB LOG] HTTP log inserted successfully ({len(cols)} columns)")
+        LOGGER.info(f"[DB LOG] HTTP log inserted successfully ({len(cols)} columns)")
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to insert http_log: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to insert http_log: {e}")
         return False
 
 def get_recent_http_logs(limit: int = 200) -> List[Dict]:
@@ -664,7 +662,7 @@ def get_recent_http_logs(limit: int = 200) -> List[Dict]:
                 """, (limit,))
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get http logs: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get http logs: {e}")
         return []
 
 
@@ -687,8 +685,7 @@ def cleanup_http_logs_older_than(days: int) -> int:
                 )
                 removed = cur.rowcount or 0
     except Exception as e:
-        print(f"[DB ERROR] Failed to cleanup http_logs older than {days} days: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to cleanup http_logs older than {days} days: {e}")
         return 0
 
     return removed
@@ -740,8 +737,7 @@ def get_http_log_summary(minutes: int = 1440) -> Dict:
                     'window_minutes': window_minutes,
                 }
     except Exception as e:
-        print(f"[DB ERROR] Failed to compute http_log summary: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to compute http_log summary: {e}")
         return {}
 
 
@@ -777,8 +773,7 @@ def get_http_log_status_breakdown(minutes: int = 1440) -> Dict:
                     'window_minutes': window_minutes,
                 }
     except Exception as e:
-        print(f"[DB ERROR] Failed to compute status breakdown: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to compute status breakdown: {e}")
         return {}
 
 
@@ -831,8 +826,7 @@ def get_http_log_timeline(minutes: int = 1440, bucket_minutes: int = 60, limit_p
                     for row in rows
                 ]))
     except Exception as e:
-        print(f"[DB ERROR] Failed to compute timeline: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to compute timeline: {e}")
         return []
 
 
@@ -862,8 +856,7 @@ def get_top_http_subdomains(minutes: int = 1440, limit: int = 5) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to compute top subdomains: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to compute top subdomains: {e}")
         return []
 
 
@@ -893,8 +886,7 @@ def get_top_http_paths(minutes: int = 1440, limit: int = 5) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to compute top paths: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to compute top paths: {e}")
         return []
 
 
@@ -926,8 +918,7 @@ def get_recent_http_errors(limit: int = 20) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to fetch recent errors: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to fetch recent errors: {e}")
         return []
 
 
@@ -955,8 +946,7 @@ def delete_http_logs(log_ids: List[int]) -> int:
                 )
                 return cur.rowcount or 0
     except Exception as e:
-        print(f"[DB ERROR] Failed to delete http logs: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to delete http logs: {e}")
         return 0
 
 def get_table_columns(table: str) -> List[str]:
@@ -973,7 +963,7 @@ def get_table_columns(table: str) -> List[str]:
                 rows = cur.fetchall() or []
                 return [r['column_name'] for r in rows]
     except Exception as e:
-        print(f"[DB ERROR] Failed to get columns for {table}: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get columns for {table}: {e}")
         return []
 
 def get_table_rows(table: str, limit: int = 200) -> List[Dict]:
@@ -989,7 +979,7 @@ def get_table_rows(table: str, limit: int = 200) -> List[Dict]:
                 cur.execute(query, (limit,))
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get rows for {table}: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get rows for {table}: {e}")
         return []
 
 def update_table_row(table: str, pk_name: str, pk_value, column: str, value) -> bool:
@@ -1008,8 +998,7 @@ def update_table_row(table: str, pk_name: str, pk_value, column: str, value) -> 
                 cur.execute(query, (value, pk_value))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to update {table}.{column}: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to update {table}.{column}: {e}")
         return False
 
 
@@ -1030,7 +1019,7 @@ def create_role(name: str, description: str = "") -> Optional[int]:
                 result = cur.fetchone()
                 return result['id'] if result else None
     except Exception as e:
-        print(f"[DB ERROR] Failed to create role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to create role: {e}")
         return None
 
 def update_role(role_id: int, name: str = None, description: str = None) -> bool:
@@ -1051,7 +1040,7 @@ def update_role(role_id: int, name: str = None, description: str = None) -> bool
                     cur.execute("UPDATE roles SET description = %s WHERE id = %s", (description, role_id))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to update role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to update role: {e}")
         return False
 
 def delete_role(role_id: int) -> bool:
@@ -1067,7 +1056,7 @@ def delete_role(role_id: int) -> bool:
                 cur.execute("DELETE FROM roles WHERE id = %s", (role_id,))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to delete role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to delete role: {e}")
         return False
 
 def create_permission(code: str, description: str = "") -> Optional[int]:
@@ -1085,7 +1074,7 @@ def create_permission(code: str, description: str = "") -> Optional[int]:
                 result = cur.fetchone()
                 return result['id'] if result else None
     except Exception as e:
-        print(f"[DB ERROR] Failed to create permission: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to create permission: {e}")
         return None
 
 def assign_permission_to_role(role_id: int, permission_id: int) -> bool:
@@ -1103,7 +1092,7 @@ def assign_permission_to_role(role_id: int, permission_id: int) -> bool:
                 cur.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (%s, %s)", (role_id, permission_id))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to assign permission to role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to assign permission to role: {e}")
         return False
 
 def deassign_permission_from_role(role_id: int, permission_id: int) -> bool:
@@ -1117,7 +1106,7 @@ def deassign_permission_from_role(role_id: int, permission_id: int) -> bool:
                 cur.execute("DELETE FROM role_permissions WHERE role_id = %s AND permission_id = %s", (role_id, permission_id))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to deassign permission from role: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to deassign permission from role: {e}")
         return False
 
 def get_role_permissions(role_id: int) -> List[Dict]:
@@ -1134,7 +1123,7 @@ def get_role_permissions(role_id: int) -> List[Dict]:
                 )
                 return cur.fetchall() or []
     except Exception as e:
-        print(f"[DB ERROR] Failed to get role permissions: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to get role permissions: {e}")
         return []
 
 def update_user(user_id: int, username: str = None, email: str = None, is_active: bool = None, password: str = None) -> bool:
@@ -1167,7 +1156,7 @@ def update_user(user_id: int, username: str = None, email: str = None, is_active
                     cur.execute(query, params)
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to update user: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to update user: {e}")
         return False
 
 def bulk_assign_roles_to_user(user_id: int, role_ids: List[int]) -> bool:
@@ -1185,7 +1174,7 @@ def bulk_assign_roles_to_user(user_id: int, role_ids: List[int]) -> bool:
                     cur.execute("INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s)", (user_id, role_id))
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to assign roles to user: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to assign roles to user: {e}")
         return False
 
 # ====== TOTP 2FA MANAGEMENT ======
@@ -1230,8 +1219,7 @@ def create_totp_secret(user_id: int) -> Optional[Tuple[str, str]]:
         
         return (secret, qr_data_uri)
     except Exception as e:
-        print(f"[DB ERROR] Failed to create TOTP secret: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to create TOTP secret: {e}")
         return None
 
 def verify_and_enable_totp(user_id: int, totp_code: str, secret: str) -> bool:
@@ -1254,8 +1242,7 @@ def verify_and_enable_totp(user_id: int, totp_code: str, secret: str) -> bool:
         
         return _persist_totp_secret(user_id, secret)
     except Exception as e:
-        print(f"[DB ERROR] Failed to enable TOTP: {e}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to enable TOTP: {e}")
         return False
 
 def verify_totp_code(user_id: int, code: str) -> bool:
@@ -1278,7 +1265,7 @@ def verify_totp_code(user_id: int, code: str) -> bool:
         totp = pyotp.TOTP(secret)
         return totp.verify(code, valid_window=1)
     except Exception as e:
-        print(f"[DB ERROR] Failed to verify TOTP code: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to verify TOTP code: {e}")
         return False
 
 def has_totp_enabled(user_id: int) -> bool:
@@ -1308,7 +1295,7 @@ def disable_totp(user_id: int) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to disable TOTP: {e}")
+        LOGGER.error(f"[DB ERROR] Failed to disable TOTP: {e}")
         return False
 
 def update_session_2fa_state(session_id: str, state_updates: Dict) -> bool:
@@ -1327,7 +1314,7 @@ def update_session_2fa_state(session_id: str, state_updates: Dict) -> bool:
                 )
                 result = cur.fetchone()
                 if not result:
-                    print(f"[DB ERROR] Session {session_id} not found or expired")
+                    LOGGER.error(f"[DB ERROR] Session {session_id} not found or expired")
                     return False
                 
                 # Get extra_data from dict (psycopg2 auto-decodes JSONB to dict)
@@ -1345,8 +1332,7 @@ def update_session_2fa_state(session_id: str, state_updates: Dict) -> bool:
                 )
         return True
     except Exception as e:
-        print(f"[DB ERROR] Failed to update session 2FA state: {type(e).__name__}: {str(e)}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to update session 2FA state: {type(e).__name__}: {str(e)}")
         return False
 
 def get_session_2fa_state(session_id: str) -> Optional[Dict]:
@@ -1369,6 +1355,5 @@ def get_session_2fa_state(session_id: str) -> Optional[Dict]:
             "csrf_token": extra_data.get('csrf_token', '')
         }
     except Exception as e:
-        print(f"[DB ERROR] Failed to get session 2FA state: {type(e).__name__}: {str(e)}")
-        traceback.print_exc()
+        LOGGER.exception(f"[DB ERROR] Failed to get session 2FA state: {type(e).__name__}: {str(e)}")
         return None
