@@ -25,6 +25,12 @@ from core.admin import (
     handle_admin_api as core_handle_admin_api,
     handle_admin_panel as core_handle_admin_panel,
 )
+from core.auth import (
+    handle_login as core_handle_login,
+    handle_logout as core_handle_logout,
+    handle_register as core_handle_register,
+    handle_user_panel as core_handle_user_panel,
+)
 from core.logging import get_logger
 from core.templates import (
     ADMIN_PAGE_FILES,
@@ -896,10 +902,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # Obsługuj specjalne trasy na ppowicz.pl
             if subdomain == "ppowicz":
                 if self.path == "/login" or self.path.startswith("/login?"):
-                    self.handle_login()
+                    core_handle_login(
+                        self,
+                        login_rate_limit_per_ip=LOGIN_RATE_LIMIT_PER_IP,
+                        login_rate_limit_per_user=LOGIN_RATE_LIMIT_PER_USER,
+                        login_rate_limit_window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+                        pending_session_max_age=PENDING_SESSION_MAX_AGE,
+                    )
                     return
                 elif self.path == "/register" or self.path.startswith("/register?"):
-                    self.handle_register()
+                    core_handle_register(
+                        self,
+                        register_rate_limit_per_ip=REGISTER_RATE_LIMIT_PER_IP,
+                        register_rate_limit_window_seconds=REGISTER_RATE_LIMIT_WINDOW_SECONDS,
+                    )
                     return
                 elif self.path == "/login/setup-2fa" or self.path.startswith("/login/setup-2fa?"):
                     core_handle_2fa_setup(
@@ -915,10 +931,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     core_handle_skip_2fa_setup(self)
                     return
                 elif self.path == "/panel" or self.path.startswith("/panel?"):
-                    self.handle_user_panel()
+                    core_handle_user_panel(self, PROJECTS)
                     return
                 elif self.path == "/logout" or self.path.startswith("/logout?"):
-                    self.handle_logout()
+                    core_handle_logout(self)
                     return
 
             # Obsługuj admin panel
@@ -1179,296 +1195,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-    def handle_login(self):
-        """Handle /login page for user authentication."""
-        # Extract 'next' parameter from query string for redirect after login
-        next_url = ""
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-            next_url = params.get("next", "")
-        
-        if self.command == "POST":
-            content_length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(content_length) if content_length > 0 else b""
-            
-            username = ""
-            password = ""
-            posted_next = ""
-            try:
-                data = parse_qs(body.decode("utf-8", errors="ignore"))
-                username = data.get("username", [""])[0]
-                password = data.get("password", [""])[0]
-                posted_next = data.get("next", [""])[0]  # Get next from form data
-            except Exception:
-                pass
-
-            ip_key = self.client_address[0]
-            if not self._check_rate_limit(
-                "login-ip", ip_key, LOGIN_RATE_LIMIT_PER_IP, LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-                "Zbyt wiele prób logowania z tego adresu IP. Odczekaj chwilę."
-            ):
-                return
-            if username:
-                if not self._check_rate_limit(
-                    "login-user", username.lower(), LOGIN_RATE_LIMIT_PER_USER, LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-                    "Zbyt wiele prób logowania dla tego konta. Odczekaj chwilę."
-                ):
-                    return
-            
-            pending_user = get_user_by_username(username) if username else None
-            if pending_user and not pending_user.get('is_active'):
-                html = self._render_login_form("Twoje konto czeka na zatwierdzenie przez administratora.", next_url)
-                self._send_html_response(200, html, is_error=False)
-                return
-
-            if username and password:
-                user_id = verify_password(username, password)
-                if user_id:
-                    # Create session with 2FA state
-                    session_id = create_session(
-                        user_id,
-                        self.client_address[0],
-                        self.headers.get("User-Agent", "")
-                    )
-                    if session_id:
-                        # Determine final redirect URL
-                        final_next = posted_next if posted_next else "/panel"
-                        
-                        # Check if user has 2FA enabled
-                        if has_totp_enabled(user_id):
-                            # User has 2FA enabled — go to 2FA challenge
-                            update_session_2fa_state(session_id, {
-                                "2fa_pending": True,
-                                "original_next": final_next
-                            })
-                            redirect_url = f"/login/2fa?next={final_next}"
-                        else:
-                            # User doesn't have 2FA — prompt setup
-                            update_session_2fa_state(session_id, {
-                                "2fa_setup_pending": True,
-                                "original_next": final_next
-                            })
-                            redirect_url = f"/login/setup-2fa?next={final_next}"
-
-                        # Issue pending-session cookie (session cookie set after 2FA success)
-                        self.send_response(303)
-                        self.send_header("Location", redirect_url)
-                        self._clear_cookie("session_id")
-                        self._set_cookie(
-                            "pending_session",
-                            session_id,
-                            max_age=PENDING_SESSION_MAX_AGE,
-                            same_site="Strict"
-                        )
-                        self.end_headers()
-                        return
-            
-            # Failed login — show form with error and preserve next parameter
-            html = self._render_login_form("Nieprawidłowe dane logowania", next_url)
-            self._send_html_response(200, html, is_error=True, error_message="Nieprawidłowe dane logowania")
-        else:
-            # GET — if user is already logged in, redirect to panel
-            user = self.get_session_user()
-            if user:
-                self.send_response(302)
-                self.send_header("Location", "/panel")
-                self.end_headers()
-                return
-
-            # otherwise show login form with next parameter
-            html = self._render_login_form("", next_url)
-            self._send_html_response(200, html, is_error=False)
-    
-    def handle_register(self):
-        """Handle /register page for creating accounts."""
-        next_url = ""
-        if "?" in self.path:
-            qs = self.path.split("?", 1)[1]
-            params = {k: v[0] for k, v in (parse_qs(qs) if qs else {}).items()} if qs else {}
-            next_url = params.get("next", "")
-
-        if self.command == "POST":
-            content_length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(content_length) if content_length > 0 else b""
-
-            username = email = password = confirm = posted_next = ""
-            try:
-                data = parse_qs(body.decode("utf-8", errors="ignore"))
-                username = data.get("username", [""])[0].strip()
-                email = data.get("email", [""])[0].strip()
-                password = data.get("password", [""])[0]
-                confirm = data.get("password_confirm", [""])[0]
-                posted_next = data.get("next", [""])[0]
-            except Exception:
-                pass
-
-            ip_key = self.client_address[0]
-            if not self._check_rate_limit(
-                "register-ip", ip_key, REGISTER_RATE_LIMIT_PER_IP, REGISTER_RATE_LIMIT_WINDOW_SECONDS,
-                "Zbyt wiele prób rejestracji z tego adresu IP. Spróbuj ponownie później."
-            ):
-                return
-
-            error = ""
-            if not username or len(username) < 3:
-                error = "Nazwa użytkownika musi mieć co najmniej 3 znaki."
-            elif not email or "@" not in email:
-                error = "Podaj poprawny adres e-mail."
-            elif not password or len(password) < 8:
-                error = "Hasło musi mieć co najmniej 8 znaków."
-            elif password != confirm:
-                error = "Hasła nie są takie same."
-
-            if error:
-                html = self._render_register_form(error, next_url)
-                self._send_html_response(200, html, is_error=True, error_message=error)
-                return
-
-            user_id = create_user(username, email, password)
-            if not user_id:
-                html = self._render_register_form("Nazwa użytkownika lub email jest już zajęty.", next_url)
-                self._send_html_response(200, html, is_error=True, error_message="Nazwa użytkownika lub email jest już zajęty.")
-                return
-
-            html = self._render_register_pending()
-            self._send_html_response(200, html, is_error=False)
-        else:
-            user = self.get_session_user()
-            if user:
-                self.send_response(302)
-                self.send_header("Location", "/panel")
-                self.end_headers()
-                return
-
-            html = self._render_register_form("", next_url)
-            self._send_html_response(200, html, is_error=False)
-
-    def _render_login_form(self, error: str = "", next_url: str = "") -> str:
-        """Render login form HTML from template."""
-        # Escape next_url for HTML attribute
-        next_url_escaped = next_url.replace('"', '&quot;').replace("'", '&#39;')
-        
-        if LOGIN_TEMPLATE:
-            html = LOGIN_TEMPLATE.replace("{ERROR_MESSAGE}", error or "")
-            html = html.replace("{NEXT_URL}", next_url_escaped)
-            return html
-        
-        # Fallback to simple form if template not found
-        return f"""<!DOCTYPE html>
-<html lang="pl">
-<head><meta charset="utf-8"><title>Logowanie</title></head>
-<body>
-    <form method="post">
-        <input type="hidden" name="next" value="{next_url_escaped}" />
-        <input type="text" name="username" placeholder="Nazwa użytkownika" autofocus />
-        <input type="password" name="password" placeholder="Hasło" />
-        <input type="submit" value="Zaloguj" />
-    </form>
-    <div style="color: #ff8080;">{error if error else ""}</div>
-</body>
-</html>"""
-    
-    def _render_register_form(self, error: str = "", next_url: str = "") -> str:
-        next_url_escaped = next_url.replace('"', '&quot;').replace("'", '&#39;')
-
-        if REGISTER_TEMPLATE:
-            html = REGISTER_TEMPLATE.replace("{ERROR_MESSAGE}", error or "")
-            html = html.replace("{NEXT_URL}", next_url_escaped)
-            return html
-
-        return f"""<!DOCTYPE html>
-<html lang=\"pl\">
-<head><meta charset=\"utf-8\"><title>Rejestracja</title></head>
-<body>
-    <form method=\"post\">
-        <input type=\"hidden\" name=\"next\" value=\"{next_url_escaped}\" />
-        <input type=\"text\" name=\"username\" placeholder=\"Nazwa użytkownika\" autofocus />
-        <input type=\"email\" name=\"email\" placeholder=\"Adres e-mail\" />
-        <input type=\"password\" name=\"password\" placeholder=\"Hasło\" />
-        <input type=\"password\" name=\"password_confirm\" placeholder=\"Powtórz hasło\" />
-        <input type=\"submit\" value=\"Zarejestruj\" />
-    </form>
-    <div style=\"color: #ff8080;\">{error if error else ''}</div>
-</body>
-</html>"""
-
-    def _render_register_pending(self) -> str:
-        if REGISTER_PENDING_TEMPLATE:
-            return REGISTER_PENDING_TEMPLATE
-
-        return """<!DOCTYPE html>
-<html lang=\"pl\">
-<head><meta charset=\"utf-8\"><title>Konto oczekuje</title></head>
-<body style=\"background:#050508;color:#f5f5f5;font-family:Arial;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;\">
-    <h1>Dziękujemy za rejestrację</h1>
-    <h2 style=\"font-size:64px;letter-spacing:0.3em;text-transform:uppercase;margin:20px 0;\">Oczekuje</h2>
-    <p>Administrator musi aktywować Twoje konto zanim się zalogujesz.</p>
-    <a href=\"/login\" style=\"color:#4ade80;text-decoration:none;margin-top:20px;\">Wróć do logowania</a>
-</body>
-</html>"""
-
-    
-    
-    def handle_user_panel(self):
-        """Handle /panel page for logged-in user."""
-        user = self.get_session_user()
-        if not user:
-            next_param = "next=https://ppowicz.pl/panel"
-            self.send_response(302)
-            self.send_header("Location", f"https://ppowicz.pl/login?{next_param}")
-            self.end_headers()
-            return
-        
-        # Show user panel (list of accessible projects)
-        html = self._render_user_panel(user)
-        self._send_html_response(200, html, is_error=False)
-    
-    def _render_user_panel(self, user: Dict) -> str:
-        """Render user panel HTML from template."""
-        # Get available projects (all non-password-protected, or those with permission)
-        available = []
-        for subdomain, proj in PROJECTS.items():
-            if not proj.password:
-                # TODO: check permission here
-                available.append((subdomain, proj.port))
-        
-        projects_html = ""
-        for subdomain, port in available:
-            projects_html += f'<li><a href="https://{subdomain}.ppowicz.pl">→ {subdomain}</a></li>'
-        
-        if not projects_html:
-            projects_html = '<li>Brak dostępu do projektów</li>'
-        
-        if USER_PANEL_TEMPLATE:
-            return USER_PANEL_TEMPLATE.replace("{USERNAME}", user['username']).replace("{PROJECTS_HTML}", projects_html)
-        
-        # Fallback to simple panel if template not found
-        return f"""<!DOCTYPE html>
-<html lang="pl">
-<head><meta charset="utf-8"><title>Panel użytkownika</title></head>
-<body>
-    <h1>Witaj, {user['username']}!</h1>
-    <h2>Twoje projekty:</h2>
-    <ul>{projects_html}</ul>
-    <a href="https://ppowicz.pl/logout">Wyloguj się</a>
-</body>
-</html>"""
-    
-    def handle_logout(self):
-        """Handle /logout — expire session and redirect."""
-        session_id = self._get_pending_or_active_session_id()
-        if session_id:
-            expire_session(session_id)
-        
-        self.send_response(302)
-        self.send_header("Location", "https://ppowicz.pl/login")
-        self._clear_cookie("session_id")
-        self._clear_cookie("pending_session")
-        self.end_headers()
-    
-    
-        
     def handle_admin_panel(self):
         """Handle admin panel at admin.ppowicz.pl."""
         core_handle_admin_panel(self)
