@@ -22,7 +22,7 @@ def _resolve_log_path() -> Path:
     env_path = os.getenv("LOGGING_PATH") or os.getenv("LOG_FILE_PATH")
     if env_path:
         return Path(env_path).expanduser()
-    return Path("/home/ppowicz/proxy/proxy.log")
+    return Path("/home/ppowicz/proxy/proxy/proxy.log")
 
 
 def _configure_root_logger() -> logging.Logger:

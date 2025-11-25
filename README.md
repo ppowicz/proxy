@@ -89,7 +89,7 @@ Kluczowe biblioteki: `psycopg2-binary`, `argon2-cffi`, `cryptography`, `python-d
 | Zmienna | Domyślna wartość | Znaczenie |
 | --- | --- | --- |
 | `ROOT_DOMAIN` | `ppowicz.pl` | Walidacja hosta i generowanie URL-i powrotnych. |
-| `PROJECTS_ROOT` | `/home/ppowicz/projects` | Lokalizacja plików `proxy-config.json`. |
+| `PROJECTS_ROOT` | `/home/ppowicz/proxy/projects` | Lokalizacja plików `proxy-config.json`. |
 | `SESSION_COOKIE_DOMAIN` | `.ppowicz.pl` | Zakres ciasteczek sesyjnych. |
 | `PROXY_AUTH_TOKEN_KEY` | – | Klucz HMAC (32 bajty) do podpisywania `proxy_auth`. |
 | `TOTP_SECRET_KEY` | – | Klucz Fernet do szyfrowania sekretów TOTP. |
@@ -130,7 +130,7 @@ Core udostępnia teraz moduł `proxy/core/email.py` z funkcjami `get_smtp_settin
   - `1` – tylko błędy (`ERROR`),
   - `2` – błędy i ostrzeżenia (`ERROR` + `WARNING`),
   - `3` – pełne logowanie (`DEBUG`, domyślnie).
-- Lokalizację pliku dziennika definiuje `LOGGING_PATH` (ew. `LOG_FILE_PATH` jako kompatybilny alias). W przypadku braku obu zmiennych używany jest `/home/ppowicz/proxy/proxy.log`.
+- Lokalizację pliku dziennika definiuje `LOGGING_PATH` (ew. `LOG_FILE_PATH` jako kompatybilny alias). W przypadku braku obu zmiennych używany jest `/home/ppowicz/proxy/proxy/proxy.log`.
 - Moduł e-mail (`core/email.py`) dodaje własny handler do pliku `EMAIL_LOG_PATH` (domyślnie `proxy/email.log`), dzięki czemu wysyłka maili ma dedykowany strumień poza głównym logiem.
 - Funkcje pomocnicze w `proxy.py`, `config.py`, `db.py`, `core/admin.py`, `core/templates.py` itp. nie tworzą już osobnych loggerów ani nie wypisują bezpośrednio na stdout – wszystkie wpisy trafiają do wspólnej konfiguracji, więc wystarczy jedna zmiana środowiskowa, by dostosować sposób rejestrowania zdarzeń.
 

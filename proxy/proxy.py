@@ -76,11 +76,11 @@ load_dotenv()
 # ====== CONFIG ======
 
 ROOT_DOMAIN = os.getenv("ROOT_DOMAIN", "ppowicz.pl")
-PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT", "/home/ppowicz/projects"))
+PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT", "/home/ppowicz/proxy/projects"))
 LOG_FILE_PATH = Path(
     os.getenv("LOG_FILE_PATH")
     or os.getenv("LOGGING_PATH", "")
-    or "/home/ppowicz/proxy/proxy.log"
+    or "/home/ppowicz/proxy/proxy/proxy.log"
 )
 LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "90"))
 LOG_CLEANUP_INTERVAL_SECONDS = int(os.getenv("LOG_CLEANUP_INTERVAL_SECONDS", str(6 * 60 * 60)))

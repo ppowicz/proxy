@@ -9,21 +9,21 @@ load_dotenv()
 
 LOGGER = get_logger("proxy.templates")
 
-ERROR_TEMPLATE_PATH = Path(os.getenv("ERROR_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/error.html"))
-PASSWORD_TEMPLATE_PATH = Path(os.getenv("PASSWORD_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/password.html"))
-LOGIN_TEMPLATE_PATH = Path(os.getenv("LOGIN_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/login.html"))
-REGISTER_TEMPLATE_PATH = Path(os.getenv("REGISTER_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/register.html"))
-REGISTER_PENDING_TEMPLATE_PATH = Path(os.getenv("REGISTER_PENDING_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/register_pending.html"))
-USER_PANEL_TEMPLATE_PATH = Path(os.getenv("USER_PANEL_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/user_panel.html"))
-TWO_FA_SETUP_TEMPLATE_PATH = Path(os.getenv("TWO_FA_SETUP_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/2fa_setup.html"))
-TWO_FA_CHALLENGE_TEMPLATE_PATH = Path(os.getenv("TWO_FA_CHALLENGE_TEMPLATE_PATH", "/home/ppowicz/proxy/sites/2fa_challenge.html"))
+ERROR_TEMPLATE_PATH = Path(os.getenv("ERROR_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/error.html"))
+PASSWORD_TEMPLATE_PATH = Path(os.getenv("PASSWORD_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/password.html"))
+LOGIN_TEMPLATE_PATH = Path(os.getenv("LOGIN_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/login.html"))
+REGISTER_TEMPLATE_PATH = Path(os.getenv("REGISTER_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/register.html"))
+REGISTER_PENDING_TEMPLATE_PATH = Path(os.getenv("REGISTER_PENDING_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/register_pending.html"))
+USER_PANEL_TEMPLATE_PATH = Path(os.getenv("USER_PANEL_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/user_panel.html"))
+TWO_FA_SETUP_TEMPLATE_PATH = Path(os.getenv("TWO_FA_SETUP_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/2fa_setup.html"))
+TWO_FA_CHALLENGE_TEMPLATE_PATH = Path(os.getenv("TWO_FA_CHALLENGE_TEMPLATE_PATH", "/home/ppowicz/proxy/proxy/sites/2fa_challenge.html"))
 
 ADMIN_PAGE_FILES = {
-    "home": Path(os.getenv("ADMIN_TEMPLATE_HOME", "/home/ppowicz/proxy/sites/admin_home.html")),
-    "db": Path(os.getenv("ADMIN_TEMPLATE_DB", "/home/ppowicz/proxy/sites/admin_db.html")),
-    "logs": Path(os.getenv("ADMIN_TEMPLATE_LOGS", "/home/ppowicz/proxy/sites/admin_logs.html")),
-    "users": Path(os.getenv("ADMIN_TEMPLATE_USERS", "/home/ppowicz/proxy/sites/admin_users.html")),
-    "roles": Path(os.getenv("ADMIN_TEMPLATE_ROLES", "/home/ppowicz/proxy/sites/admin_roles.html")),
+    "home": Path(os.getenv("ADMIN_TEMPLATE_HOME", "/home/ppowicz/proxy/proxy/sites/admin_home.html")),
+    "db": Path(os.getenv("ADMIN_TEMPLATE_DB", "/home/ppowicz/proxy/proxy/sites/admin_db.html")),
+    "logs": Path(os.getenv("ADMIN_TEMPLATE_LOGS", "/home/ppowicz/proxy/proxy/sites/admin_logs.html")),
+    "users": Path(os.getenv("ADMIN_TEMPLATE_USERS", "/home/ppowicz/proxy/proxy/sites/admin_users.html")),
+    "roles": Path(os.getenv("ADMIN_TEMPLATE_ROLES", "/home/ppowicz/proxy/proxy/sites/admin_roles.html")),
 }
 
 ADMIN_ROUTE_TO_TEMPLATE = {
