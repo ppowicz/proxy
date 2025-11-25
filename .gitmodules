@@ -1,3 +1,7 @@
 [submodule "projects/kf"]
 	path = projects/kf
 	url = https://github.com/ppowicz/kf
+
+[submodule "projects/paste"]
+	path = projects/paste
+	url = https://github.com/ppowicz/paste
