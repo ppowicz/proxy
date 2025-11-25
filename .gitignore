@@ -3,3 +3,17 @@ __pycache__/
 .vscode/
 .env
 .DS_store
+.bash_history
+.bash_logout
+.bashrc
+.cache/
+.dotnet/
+.landscape/
+.lesshst
+.local/
+.profile
+.python_history
+.ssh/
+.sudo_as_admin_successful
+.wget-hsts
+proxy/proxy.log
