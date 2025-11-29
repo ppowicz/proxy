@@ -5,6 +5,7 @@ import hmac
 import http.client
 import html
 import json
+import mimetypes
 import os
 import secrets
 import shutil
@@ -18,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingMixIn
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from dotenv import load_dotenv
 
@@ -85,6 +86,7 @@ PUBLIC_PAGE_FILES = {
     "glowna": PUBLIC_PAGES_DIR / "glowna.html",
     "kontakt": PUBLIC_PAGES_DIR / "kontakt.html",
 }
+STATIC_FILES_DIR = (MODULE_ROOT / "static").resolve()
 LOG_FILE_PATH = Path(
     os.getenv("LOG_FILE_PATH")
     or os.getenv("LOGGING_PATH", "")
@@ -434,6 +436,55 @@ def _handle_ppowicz_2fa_setup(handler: 'ProxyHandler') -> None:
 
 def _handle_ppowicz_user_panel(handler: 'ProxyHandler') -> None:
     core_handle_user_panel(handler, PROJECTS)
+
+
+def _handle_ppowicz_static(handler: 'ProxyHandler') -> None:
+    """Serve files from proxy/static for /static/... requests."""
+    request_path = handler.path.split("?", 1)[0]
+    rel_url = request_path[len("/static/") :].lstrip("/")
+    if not rel_url:
+        handler.send_error_page("404")
+        return
+
+    try:
+        relative_path = Path(unquote(rel_url))
+    except Exception:
+        handler.send_error_page("404")
+        return
+
+    try:
+        candidate = (STATIC_FILES_DIR / relative_path).resolve()
+        candidate.relative_to(STATIC_FILES_DIR)
+    except Exception:
+        handler.send_error_page("404")
+        return
+
+    if not candidate.is_file():
+        handler.send_error_page("404")
+        return
+
+    content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+    cache_control = "public, max-age=300" if content_type.startswith("text/") else "public, max-age=86400"
+
+    try:
+        file_size = candidate.stat().st_size
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(file_size))
+        handler.send_header("Cache-Control", cache_control)
+        handler.end_headers()
+
+        bytes_written = 0
+        if handler.command != "HEAD":
+            with candidate.open("rb") as src:
+                shutil.copyfileobj(src, handler.wfile)
+            bytes_written = file_size
+        handler._log_simple_response(200, bytes_written, is_error=False)
+    except FileNotFoundError:
+        handler.send_error_page("404")
+    except Exception as exc:
+        log_error(f"[STATIC] Failed to serve {candidate}: {exc}", exc_info=True)
+        handler.send_error_page("500")
 
 
 # Central map of ppowicz endpoint paths to their handlers to keep routing logic tidy.
@@ -1019,6 +1070,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
             # Obsługuj specjalne trasy na ppowicz.pl
             if subdomain == "ppowicz":
+                if path_base.startswith("/static/"):
+                    _handle_ppowicz_static(self)
+                    return
                 handler_fn = PPOWICZ_ENDPOINT_HANDLERS.get(path_base)
                 if handler_fn:
                     handler_fn(self)
