@@ -86,6 +86,10 @@ PUBLIC_PAGE_FILES = {
     "glowna": PUBLIC_PAGES_DIR / "glowna.html",
     "kontakt": PUBLIC_PAGES_DIR / "kontakt.html",
 }
+PUBLIC_PAGE_ROUTES = {
+    "glowna": "/",
+    "kontakt": "/kontakt",
+}
 STATIC_FILES_DIR = (MODULE_ROOT / "static").resolve()
 LOG_FILE_PATH = Path(
     os.getenv("LOG_FILE_PATH")
@@ -487,6 +491,45 @@ def _handle_ppowicz_static(handler: 'ProxyHandler') -> None:
         handler.send_error_page("500")
 
 
+def _handle_ppowicz_sitemap(handler: 'ProxyHandler') -> None:
+    urls = []
+    for key, path in PUBLIC_PAGE_FILES.items():
+        route = PUBLIC_PAGE_ROUTES.get(key)
+        if not route:
+            continue
+        full_route = route if route.startswith("/") else f"/{route}"
+        loc = f"https://{ROOT_DOMAIN}{full_route}"
+        try:
+            mtime = datetime.utcfromtimestamp(path.stat().st_mtime)
+            lastmod = mtime.strftime("%Y-%m-%d")
+        except Exception:
+            lastmod = None
+        urls.append((loc, lastmod))
+
+    xml_parts = [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">",
+    ]
+    for loc, lastmod in urls:
+        xml_parts.append("  <url>")
+        xml_parts.append(f"    <loc>{loc}</loc>")
+        if lastmod:
+            xml_parts.append(f"    <lastmod>{lastmod}</lastmod>")
+        xml_parts.append("    <changefreq>weekly</changefreq>")
+        xml_parts.append("    <priority>0.8</priority>")
+        xml_parts.append("  </url>")
+    xml_parts.append("</urlset>")
+
+    body = "\n".join(xml_parts)
+    handler._send_html_response(
+        200,
+        body,
+        content_type="application/xml; charset=utf-8",
+        is_error=False,
+        allow_index=True,
+    )
+
+
 # Central map of ppowicz endpoint paths to their handlers to keep routing logic tidy.
 PPOWICZ_ENDPOINT_HANDLERS: Dict[str, Callable[['ProxyHandler'], None]] = {
     "/": _handle_ppowicz_root,
@@ -498,6 +541,7 @@ PPOWICZ_ENDPOINT_HANDLERS: Dict[str, Callable[['ProxyHandler'], None]] = {
     "/login/skip-2fa-setup": core_handle_skip_2fa_setup,
     "/panel": _handle_ppowicz_user_panel,
     "/logout": core_handle_logout,
+    "/sitemap.xml": _handle_ppowicz_sitemap,
 }
 
 
