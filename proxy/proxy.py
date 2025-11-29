@@ -397,7 +397,7 @@ def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
         return
     if page_key == "kontakt":
         html = _render_contact_page(html)
-    handler._send_html_response(200, html, is_error=False)
+    handler._send_html_response(200, html, is_error=False, allow_index=True)
 
 
 def _handle_ppowicz_root(handler: 'ProxyHandler') -> None:
@@ -1015,11 +1015,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         log_request: bool = True,
         is_error: Optional[bool] = None,
         error_message: Optional[str] = None,
+        allow_index: bool = False,
     ) -> None:
         """Write HTML content with common headers and optional logging."""
         body = html.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if not allow_index:
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
         self.send_header("Content-Length", str(len(body)))
         if headers:
             for key, value in headers.items():
