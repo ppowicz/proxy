@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <title>Ppowicz.pl - Kontakt</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: radial-gradient(circle at top, #0d0d1c, #030307 70%);
+            color: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        .noise {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"%3E%3Crect width="160" height="160" fill="%23000000"/%3E%3Ccircle cx="40" cy="40" r="1" fill="%23ffffff" fill-opacity="0.05"/%3E%3Ccircle cx="120" cy="80" r="1" fill="%23ffffff" fill-opacity="0.04"/%3E%3Ccircle cx="80" cy="120" r="1" fill="%23ffffff" fill-opacity="0.03"/%3E%3C/svg%3E');
+            opacity: 0.35;
+            animation: noiseFade 6s ease-in-out infinite alternate;
+        }
+        .card {
+            position: relative;
+            z-index: 1;
+            padding: 40px;
+            width: min(640px, 90vw);
+            text-align: center;
+            animation: fadeIn 1.2s ease forwards;
+        }
+        .badge {
+            display: inline-flex;
+            padding: 6px 18px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.2);
+            letter-spacing: 0.35em;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            animation: slideDown 1s ease forwards;
+        }
+        h1 {
+            margin: 28px 0 12px;
+            font-size: clamp(32px, 5vw, 56px);
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            font-weight: 300;
+            animation: slideUp 1.2s ease forwards;
+        }
+        h2 {
+            margin: 0;
+            font-weight: 100;
+            letter-spacing: 0.3em;
+            font-size: clamp(16px, 4vw, 24px);
+            color: rgba(255, 255, 255, 0.6);
+            animation: slideUp 1.6s ease forwards;
+        }
+        p.subtitle {
+            margin: 0;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            font-size: 14px;
+            color: rgba(255,255,255,0.5);
+            animation: slideUp 1.4s ease forwards;
+        }
+        .grid {
+            margin-top: 48px;
+            display: grid;
+            gap: 18px;
+            animation: fadeIn 1.8s ease forwards;
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 20px 24px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.02);
+            transition: transform 0.4s ease, border-color 0.4s ease;
+        }
+        .item:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255,255,255,0.35);
+        }
+        .icon {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .icon img {
+            width: 24px;
+            height: 24px;
+            filter: invert(1) brightness(1.2);
+        }
+        .details {
+            text-align: left;
+        }
+        .label {
+            font-size: 12px;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.55);
+        }
+        .value {
+            margin-top: 6px;
+            font-size: 18px;
+            letter-spacing: 0.1em;
+        }
+        .value a {
+            color: #f5f5f5;
+            text-decoration: none;
+        }
+        .value a:hover {
+            text-decoration: underline;
+        }
+        .back {
+            margin-top: 32px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            animation: fadeIn 2s ease forwards;
+        }
+        .back svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            fill: none;
+        }
+        @media (max-width: 520px) {
+            .card { padding: 28px; }
+            .grid { gap: 12px; }
+            .item { flex-direction: column; text-align: center; }
+            .details { text-align: center; }
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(35px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-25px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes noiseFade { from { opacity: 0.15; } to { opacity: 0.35; } }
+    </style>
+</head>
+<body>
+    <div class="noise" aria-hidden="true"></div>
+    <section class="card">
+        <h1>KONTAKT</h1>
+        <h2 class="subtitle">direct lines</h2>
+        <div class="grid">
+            <div class="item">
+                <div class="icon" aria-hidden="true">
+                    <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/mail.svg" alt="Ikona mail">
+                </div>
+                <div class="details">
+                    <div class="label">Email</div>
+                    <div class="value"><a href="mailto:patryk@ppowicz.pl">patryk@ppowicz.pl</a></div>
+                </div>
+            </div>
+            <div class="item">
+                <div class="icon" aria-hidden="true">
+                    <img src="https://cdn.jsdelivr.net/npm/simple-icons@9.16.0/icons/github.svg" alt="Ikona GitHub">
+                </div>
+                <div class="details">
+                    <div class="label">GitHub</div>
+                    <div class="value"><a href="https://github.com/ppowicz" target="_blank" rel="noopener">github.com/ppowicz</a></div>
+                </div>
+            </div>
+            <div class="item">
+                <div class="icon" aria-hidden="true">
+                    <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/phone.svg" alt="Ikona telefonu">
+                </div>
+                <div class="details">
+                    <div class="label">Telefon</div>
+                    <div class="value"><a href="tel:+48603276742">+48 603 276 742</a></div>
+                </div>
+            </div>
+        </div>
+        <a class="back" href="/">
+            <svg viewBox="0 0 24 24">
+                <polyline points="15 18 9 12 15 6"></polyline>
+                <line x1="9" y1="12" x2="21" y2="12"></line>
+            </svg>
+            Powrót
+        </a>
+    </section>
+</body>
+</html>

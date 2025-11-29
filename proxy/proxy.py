@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingMixIn
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
@@ -77,6 +77,12 @@ load_dotenv()
 
 ROOT_DOMAIN = os.getenv("ROOT_DOMAIN", "ppowicz.pl")
 PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT", "/home/ppowicz/proxy/projects"))
+MODULE_ROOT = Path(__file__).resolve().parent
+PUBLIC_PAGES_DIR = MODULE_ROOT / "public"
+PUBLIC_PAGE_FILES = {
+    "glowna": PUBLIC_PAGES_DIR / "glowna.html",
+    "kontakt": PUBLIC_PAGES_DIR / "kontakt.html",
+}
 LOG_FILE_PATH = Path(
     os.getenv("LOG_FILE_PATH")
     or os.getenv("LOGGING_PATH", "")
@@ -331,6 +337,76 @@ class RateLimiter:
 
 
 RATE_LIMITER = RateLimiter()
+
+
+def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
+    """Return static HTML for public endpoints."""
+    page_path = PUBLIC_PAGE_FILES.get(page_key)
+    if not page_path:
+        handler.send_error_page("404")
+        return
+    try:
+        html = page_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        handler.send_error_page("404")
+        return
+    except Exception as exc:
+        log_error(f"[PUBLIC] Failed to read {page_path}: {exc}")
+        handler.send_error_page("500")
+        return
+    handler._send_html_response(200, html, is_error=False)
+
+
+def _handle_ppowicz_root(handler: 'ProxyHandler') -> None:
+    _serve_public_page(handler, "glowna")
+
+
+def _handle_ppowicz_kontakt(handler: 'ProxyHandler') -> None:
+    _serve_public_page(handler, "kontakt")
+
+
+def _handle_ppowicz_login(handler: 'ProxyHandler') -> None:
+    core_handle_login(
+        handler,
+        login_rate_limit_per_ip=LOGIN_RATE_LIMIT_PER_IP,
+        login_rate_limit_per_user=LOGIN_RATE_LIMIT_PER_USER,
+        login_rate_limit_window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        pending_session_max_age=PENDING_SESSION_MAX_AGE,
+    )
+
+
+def _handle_ppowicz_register(handler: 'ProxyHandler') -> None:
+    core_handle_register(
+        handler,
+        register_rate_limit_per_ip=REGISTER_RATE_LIMIT_PER_IP,
+        register_rate_limit_window_seconds=REGISTER_RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+
+def _handle_ppowicz_2fa_setup(handler: 'ProxyHandler') -> None:
+    core_handle_2fa_setup(
+        handler,
+        rate_limit_per_session=TWO_FA_RATE_LIMIT_PER_SESSION,
+        rate_limit_window_seconds=TWO_FA_RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+
+def _handle_ppowicz_user_panel(handler: 'ProxyHandler') -> None:
+    core_handle_user_panel(handler, PROJECTS)
+
+
+# Central map of ppowicz endpoint paths to their handlers to keep routing logic tidy.
+PPOWICZ_ENDPOINT_HANDLERS: Dict[str, Callable[['ProxyHandler'], None]] = {
+    "/": _handle_ppowicz_root,
+    "/kontakt": _handle_ppowicz_kontakt,
+    "/login": _handle_ppowicz_login,
+    "/register": _handle_ppowicz_register,
+    "/login/setup-2fa": _handle_ppowicz_2fa_setup,
+    "/login/2fa": core_handle_2fa_challenge,
+    "/login/skip-2fa-setup": core_handle_skip_2fa_setup,
+    "/panel": _handle_ppowicz_user_panel,
+    "/logout": core_handle_logout,
+}
 
 
 def _read_meminfo() -> Dict[str, int]:
@@ -895,46 +971,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # Record request start time for backend timing/logging
             request_start_ts = time.time()
             subdomain = self.get_subdomain()
+            path_base = self.path.split("?", 1)[0]
             if not subdomain:
                 self.send_error_page("404")
                 return
 
             # Obsługuj specjalne trasy na ppowicz.pl
             if subdomain == "ppowicz":
-                if self.path == "/login" or self.path.startswith("/login?"):
-                    core_handle_login(
-                        self,
-                        login_rate_limit_per_ip=LOGIN_RATE_LIMIT_PER_IP,
-                        login_rate_limit_per_user=LOGIN_RATE_LIMIT_PER_USER,
-                        login_rate_limit_window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-                        pending_session_max_age=PENDING_SESSION_MAX_AGE,
-                    )
-                    return
-                elif self.path == "/register" or self.path.startswith("/register?"):
-                    core_handle_register(
-                        self,
-                        register_rate_limit_per_ip=REGISTER_RATE_LIMIT_PER_IP,
-                        register_rate_limit_window_seconds=REGISTER_RATE_LIMIT_WINDOW_SECONDS,
-                    )
-                    return
-                elif self.path == "/login/setup-2fa" or self.path.startswith("/login/setup-2fa?"):
-                    core_handle_2fa_setup(
-                        self,
-                        rate_limit_per_session=TWO_FA_RATE_LIMIT_PER_SESSION,
-                        rate_limit_window_seconds=TWO_FA_RATE_LIMIT_WINDOW_SECONDS,
-                    )
-                    return
-                elif self.path == "/login/2fa" or self.path.startswith("/login/2fa?"):
-                    core_handle_2fa_challenge(self)
-                    return
-                elif self.path == "/login/skip-2fa-setup" or self.path.startswith("/login/skip-2fa-setup?"):
-                    core_handle_skip_2fa_setup(self)
-                    return
-                elif self.path == "/panel" or self.path.startswith("/panel?"):
-                    core_handle_user_panel(self, PROJECTS)
-                    return
-                elif self.path == "/logout" or self.path.startswith("/logout?"):
-                    core_handle_logout(self)
+                handler_fn = PPOWICZ_ENDPOINT_HANDLERS.get(path_base)
+                if handler_fn:
+                    handler_fn(self)
                     return
 
             # Obsługuj admin panel
