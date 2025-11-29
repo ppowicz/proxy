@@ -108,6 +108,40 @@ PASSWORD_HASHER = PasswordHasher(
     salt_len=int(os.getenv("ARGON2_SALT_LENGTH", "16"))
 )
 
+CONTACT_ICON_DEFAULT_URL = os.getenv(
+    "CONTACT_DEFAULT_ICON_URL",
+    "https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/link.svg",
+)
+CONTACT_METHOD_DEFAULTS: List[Dict[str, str]] = [
+    {
+        "label": os.getenv("CONTACT_DEFAULT_LABEL_EMAIL", "Email"),
+        "value": os.getenv("CONTACT_DEFAULT_EMAIL", "kontakt@ppowicz.pl"),
+        "href": os.getenv("CONTACT_DEFAULT_EMAIL_LINK", "mailto:kontakt@ppowicz.pl"),
+        "icon_url": os.getenv(
+            "CONTACT_DEFAULT_EMAIL_ICON",
+            "https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/mail.svg",
+        ),
+    },
+    {
+        "label": os.getenv("CONTACT_DEFAULT_LABEL_PHONE", "Telefon"),
+        "value": os.getenv("CONTACT_DEFAULT_PHONE", "+48 600 111 222"),
+        "href": os.getenv("CONTACT_DEFAULT_PHONE_LINK", "tel:+48600111222"),
+        "icon_url": os.getenv(
+            "CONTACT_DEFAULT_PHONE_ICON",
+            "https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/phone.svg",
+        ),
+    },
+    {
+        "label": os.getenv("CONTACT_DEFAULT_LABEL_GITHUB", "GitHub"),
+        "value": os.getenv("CONTACT_DEFAULT_GITHUB", "github.com/ppowicz"),
+        "href": os.getenv("CONTACT_DEFAULT_GITHUB_LINK", "https://github.com/ppowicz"),
+        "icon_url": os.getenv(
+            "CONTACT_DEFAULT_GITHUB_ICON",
+            "https://cdn.jsdelivr.net/npm/simple-icons@9.16.0/icons/github.svg",
+        ),
+    },
+]
+
 _TOTP_SECRET_KEY = os.getenv("TOTP_SECRET_KEY", "").strip()
 _FERNET = None
 if _TOTP_SECRET_KEY:
@@ -948,6 +982,95 @@ def delete_http_logs(log_ids: List[int]) -> int:
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to delete http logs: {e}")
         return 0
+
+
+# ====== CONTACT METHODS ======
+
+def _fallback_contact_methods() -> List[Dict[str, str]]:
+    defaults = []
+    for item in CONTACT_METHOD_DEFAULTS:
+        defaults.append({
+            "id": None,
+            "label": item.get("label", ""),
+            "value": item.get("value", ""),
+            "href": item.get("href", item.get("value", "")),
+            "icon_url": item.get("icon_url") or CONTACT_ICON_DEFAULT_URL,
+            "sort_order": len(defaults),
+        })
+    return defaults
+
+
+def _sanitize_contact_methods(methods: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    sanitized: List[Dict[str, str]] = []
+    for idx, raw in enumerate(methods or []):
+        label = (raw.get("label") or "").strip()
+        value = (raw.get("value") or "").strip()
+        href = (raw.get("href") or "").strip() or value
+        icon_url = (raw.get("icon_url") or "").strip() or CONTACT_ICON_DEFAULT_URL
+        if not label or not value:
+            continue
+        sanitized.append({
+            "label": label,
+            "value": value,
+            "href": href,
+            "icon_url": icon_url,
+            "sort_order": idx,
+        })
+    if not sanitized:
+        return _fallback_contact_methods()
+    return sanitized
+
+
+def get_contact_methods() -> List[Dict[str, str]]:
+    conn = DBConnection.get_connection()
+    if not conn:
+        return _fallback_contact_methods()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, label, value, href, icon_url, sort_order
+                    FROM contact_methods
+                    ORDER BY sort_order ASC, id ASC
+                    """
+                )
+                rows = cur.fetchall() or []
+                if not rows:
+                    return _fallback_contact_methods()
+                return rows
+    except Exception as exc:
+        LOGGER.error(f"[DB ERROR] Failed to load contact methods: {exc}")
+        return _fallback_contact_methods()
+
+
+def replace_contact_methods(methods: List[Dict[str, str]]) -> Optional[List[Dict[str, str]]]:
+    sanitized = _sanitize_contact_methods(methods)
+    conn = DBConnection.get_connection()
+    if not conn:
+        return None
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM contact_methods")
+                for idx, item in enumerate(sanitized):
+                    cur.execute(
+                        """
+                        INSERT INTO contact_methods (label, value, href, icon_url, sort_order, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, now())
+                        """,
+                        (
+                            item["label"],
+                            item["value"],
+                            item["href"],
+                            item["icon_url"],
+                            idx,
+                        ),
+                    )
+        return get_contact_methods()
+    except Exception as exc:
+        LOGGER.error(f"[DB ERROR] Failed to replace contact methods: {exc}")
+        return None
 
 def get_table_columns(table: str) -> List[str]:
     """Return list of column names for a table. Sanitize table name."""

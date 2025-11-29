@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import http.client
+import html
 import json
 import os
 import secrets
@@ -16,7 +17,7 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingMixIn
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
@@ -68,7 +69,8 @@ from db import (
     create_user, has_totp_enabled, update_session_2fa_state, create_totp_secret, verify_and_enable_totp,
     verify_totp_code, disable_totp, get_session_2fa_state, cleanup_http_logs_older_than,
     get_http_log_summary, get_http_log_status_breakdown, get_http_log_timeline,
-    get_top_http_subdomains, get_top_http_paths, get_recent_http_errors, delete_http_logs
+    get_top_http_subdomains, get_top_http_paths, get_recent_http_errors, delete_http_logs,
+    get_contact_methods, CONTACT_METHOD_DEFAULTS
 )
 
 load_dotenv()
@@ -106,6 +108,10 @@ TWO_FA_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("TWO_FA_RATE_LIMIT_WINDOW_SECON
 REGISTER_RATE_LIMIT_PER_IP = int(os.getenv("REGISTER_RATE_LIMIT_PER_IP", "5"))
 REGISTER_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("REGISTER_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 HTTP_BODY_LOG_BYTES = int(os.getenv("HTTP_LOG_BODY_LIMIT_BYTES", str(4 * 1024)))
+CONTACT_ICON_FALLBACK = os.getenv(
+    "CONTACT_ICON_FALLBACK_URL",
+    "https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/link.svg",
+)
 
 PROCESS_START_TIME = time.time()
 LOGGER = get_logger("proxy")
@@ -339,6 +345,39 @@ class RateLimiter:
 RATE_LIMITER = RateLimiter()
 
 
+def _build_contact_items_html(methods: Optional[List[Dict[str, str]]]) -> str:
+    items = methods or CONTACT_METHOD_DEFAULTS
+    fragments = []
+    for item in items:
+        label = html.escape(item.get("label") or "")
+        value = html.escape(item.get("value") or "")
+        href_raw = item.get("href") or ""
+        href = html.escape(href_raw if href_raw else value, quote=True) or "#"
+        icon_url = html.escape(item.get("icon_url") or CONTACT_ICON_FALLBACK, quote=True)
+        fragments.append(
+            """
+            <div class="item">
+                <div class="icon" aria-hidden="true">
+                    <img src="{icon}" alt="Ikona kontaktu">
+                </div>
+                <div class="details">
+                    <div class="label">{label}</div>
+                    <div class="value"><a href="{href}" target="_blank" rel="noopener">{value}</a></div>
+                </div>
+            </div>
+            """.format(icon=icon_url, label=label, href=href, value=value).strip()
+        )
+    return "\n".join(fragments)
+
+
+def _render_contact_page(html_text: str) -> str:
+    items_html = _build_contact_items_html(get_contact_methods())
+    placeholder = "<!--CONTACT_ITEMS-->"
+    if placeholder in html_text:
+        return html_text.replace(placeholder, items_html)
+    return html_text.replace("</div>", f"{items_html}</div>", 1)
+
+
 def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
     """Return static HTML for public endpoints."""
     page_path = PUBLIC_PAGE_FILES.get(page_key)
@@ -354,6 +393,8 @@ def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
         log_error(f"[PUBLIC] Failed to read {page_path}: {exc}")
         handler.send_error_page("500")
         return
+    if page_key == "kontakt":
+        html = _render_contact_page(html)
     handler._send_html_response(200, html, is_error=False)
 
 

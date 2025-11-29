@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin · Kontakt</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { background: #050508; color: #f5f5f5; font-family: 'Roboto', sans-serif; }
+        .admin-shell { display: flex; height: 100vh; }
+        .sidebar { width: 220px; background: #0b0b0d; padding: 20px; border-right: 1px solid #1a1a1d; display: flex; flex-direction: column; }
+        .sidebar .logo { font-size: 24px; font-weight: 700; margin-bottom: 30px; color: #fff; text-align: center; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+        .sidebar nav a { display: block; color: #aaa; text-decoration: none; padding: 10px 12px; border-radius: 6px; font-size: 14px; transition: all 0.2s; }
+        .sidebar nav a:hover { color: #fff; background: #151517; }
+        .sidebar nav a.active { background: #1f1f1f; color: #fff; font-weight: 600; }
+        .main { flex: 1; padding: 24px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1d; }
+        header h1 { margin: 0; font-size: 28px; font-weight: 300; }
+        .meta { font-size: 12px; color: #888; }
+        .section { padding: 20px; background: #0b0b0d; border-radius: 6px; border: 1px solid #1a1a1d; display: flex; flex-direction: column; gap: 16px; }
+        .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .section-head h2 { margin: 0; font-size: 18px; font-weight: 400; }
+        .section-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        form { display: flex; flex-direction: column; gap: 16px; }
+        label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #bdbdbd; }
+        input { background: #0f0f11; border: 1px solid #1f1f23; color: #f5f5f5; padding: 10px; border-radius: 6px; font-size: 14px; }
+        input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+        button { background: #1f1f1f; color: #fff; border: 1px solid #333; padding: 10px 16px; border-radius: 6px; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all 0.2s; }
+        button:hover:not(:disabled) { background: #2a2a2d; border-color: #555; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.ghost { background: transparent; border-color: #2f2f33; color: #ccc; }
+        .status { font-size: 13px; color: #9ca3af; min-height: 18px; }
+        .status.ok { color: #4ade80; }
+        .status.error { color: #f87171; }
+        .method-list { display: flex; flex-direction: column; gap: 16px; }
+        .method-card { border: 1px solid #1f1f23; border-radius: 8px; padding: 16px; background: #0f0f11; display: flex; flex-direction: column; gap: 12px; }
+        .method-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #bdbdbd; }
+        .method-actions { display: flex; gap: 6px; }
+        .method-actions button { padding: 6px 10px; font-size: 11px; letter-spacing: 0.08em; }
+        .method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .form-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+        .empty-hint { margin: 0; color: #777; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; }
+        .preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+        .preview-card { border: 1px solid #1f1f23; border-radius: 12px; padding: 14px; background: #0f0f11; display: flex; gap: 12px; align-items: center; }
+        .preview-icon { width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .preview-icon img { width: 22px; height: 22px; filter: invert(1) brightness(1.1); }
+        .preview-details { display: flex; flex-direction: column; gap: 4px; }
+        .preview-details .label { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.65); }
+        .preview-details .value a { color: #f5f5f5; text-decoration: none; }
+        .preview-details .value a:hover { text-decoration: underline; }
+        .preview-details .value { font-size: 15px; letter-spacing: 0.05em; }
+        @media (max-width: 640px) {
+            .admin-shell { flex-direction: column; }
+            .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; }
+            .sidebar nav { flex-direction: row; flex-wrap: wrap; }
+            .main { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-shell">
+        <aside class="sidebar">
+            <div class="logo">⚙️ Admin</div>
+            <nav>
+                <a href="/">🏠 Strona główna</a>
+                <a href="/db">📊 Baza danych</a>
+                <a href="/logs">🔍 Ruch HTTP</a>
+                <a href="/users">👥 Użytkownicy</a>
+                <a href="/roles">🔐 Role & uprawn.</a>
+                <a href="/contact" class="active">📇 Kontakt</a>
+            </nav>
+        </aside>
+        <main class="main">
+            <header>
+                <h1>Dane kontaktowe</h1>
+                <div class="meta">Zalogowany: {ADMIN_USERNAME}</div>
+            </header>
+            <section class="section">
+                <div class="section-head">
+                    <h2>📇 Kanały kontaktu</h2>
+                    <div class="section-actions">
+                        <button type="button" id="add-method" class="ghost">+ Dodaj kanał</button>
+                        <button type="button" id="reset-defaults" class="ghost">Przywróć domyślne</button>
+                    </div>
+                </div>
+                <p class="empty-hint">Każdy wpis = osobna karta na stronie kontaktowej.</p>
+                <form id="contact-form">
+                    <div id="methods-list" class="method-list">
+                        <p class="empty-hint">Ładowanie danych…</p>
+                    </div>
+                    <div class="form-footer">
+                        <button type="submit" id="save-methods">Zapisz zmiany</button>
+                        <div id="contact-status" class="status"></div>
+                    </div>
+                </form>
+            </section>
+            <section class="section">
+                <h2>👀 Podgląd</h2>
+                <div id="preview-list" class="preview-grid">
+                    <p class="empty-hint">Brak danych do wyświetlenia.</p>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script>
+    async function api(path, opts) {
+        const res = await fetch('/api/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+        if (!res.ok) throw new Error('API error ' + res.status);
+        return res.json();
+    }
+
+    const form = document.getElementById('contact-form');
+    const listEl = document.getElementById('methods-list');
+    const previewEl = document.getElementById('preview-list');
+    const addBtn = document.getElementById('add-method');
+    const resetBtn = document.getElementById('reset-defaults');
+    const saveBtn = document.getElementById('save-methods');
+    const statusEl = document.getElementById('contact-status');
+
+    const ICON_PLACEHOLDER = 'https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/link.svg';
+    const EMPTY_METHOD = { label: '', value: '', href: '', icon_url: '' };
+
+    let methods = [];
+    let defaults = [];
+
+    const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+    function escapeHtml(value) {
+        if (!value) return '';
+        return value.replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch] || ch);
+    }
+
+    function cloneMethod(data = EMPTY_METHOD) {
+        return {
+            label: (data.label || '').trim(),
+            value: (data.value || '').trim(),
+            href: (data.href || '').trim(),
+            icon_url: (data.icon_url || '').trim(),
+        };
+    }
+
+    function normalizeMethods(list) {
+        return (list || []).map((item, idx) => ({
+            ...cloneMethod(item),
+            sort_order: idx,
+        }));
+    }
+
+    function setStatus(text, type) {
+        statusEl.textContent = text || '';
+        statusEl.classList.remove('ok', 'error');
+        if (type === 'ok') statusEl.classList.add('ok');
+        if (type === 'error') statusEl.classList.add('error');
+    }
+
+    function renderMethods() {
+        if (!methods.length) {
+            listEl.innerHTML = '<p class="empty-hint">Brak wpisów. Dodaj nowy kanał.</p>';
+            return;
+        }
+        listEl.innerHTML = methods.map((method, idx) => `
+            <div class="method-card" data-index="${idx}">
+                <div class="method-head">
+                    <span>Pozycja ${idx + 1}</span>
+                    <div class="method-actions">
+                        <button type="button" data-action="move-up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+                        <button type="button" data-action="move-down" ${idx === methods.length - 1 ? 'disabled' : ''}>↓</button>
+                        <button type="button" data-action="remove">Usuń</button>
+                    </div>
+                </div>
+                <div class="method-grid">
+                    <label>Nagłówek
+                        <input name="label" value="${escapeHtml(method.label)}" placeholder="Email / GitHub / Telefon" required>
+                    </label>
+                    <label>Wartość
+                        <input name="value" value="${escapeHtml(method.value)}" placeholder="np. kontakt@ppowicz.pl" required>
+                    </label>
+                    <label>Docelowy link
+                        <input name="href" value="${escapeHtml(method.href)}" placeholder="mailto: / https:// / tel:">
+                    </label>
+                    <label>Ikona (URL SVG/PNG)
+                        <input name="icon_url" value="${escapeHtml(method.icon_url)}" placeholder="https://cdn...">
+                    </label>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function renderPreview() {
+        if (!methods.length) {
+            previewEl.innerHTML = '<p class="empty-hint">Brak danych do wyświetlenia.</p>';
+            return;
+        }
+        previewEl.innerHTML = methods.map((method) => {
+            const label = escapeHtml(method.label) || '—';
+            const value = escapeHtml(method.value) || '—';
+            const href = escapeHtml(method.href || method.value);
+            const icon = escapeHtml(method.icon_url || ICON_PLACEHOLDER);
+            const link = href ? `<a href="${href}" target="_blank" rel="noopener">${value}</a>` : value;
+            return `
+                <div class="preview-card">
+                    <div class="preview-icon" aria-hidden="true">
+                        <img src="${icon}" alt="Ikona kontaktu">
+                    </div>
+                    <div class="preview-details">
+                        <div class="label">${label}</div>
+                        <div class="value">${link}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function refreshUI() {
+        methods = normalizeMethods(methods);
+        renderMethods();
+        renderPreview();
+    }
+
+    listEl.addEventListener('input', (event) => {
+        const row = event.target.closest('.method-card');
+        if (!row) return;
+        const idx = Number(row.dataset.index);
+        if (Number.isNaN(idx) || !methods[idx]) return;
+        const field = event.target.name;
+        if (!field) return;
+        methods[idx][field] = event.target.value;
+        renderPreview();
+    });
+
+    listEl.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const row = button.closest('.method-card');
+        if (!row) return;
+        const idx = Number(row.dataset.index);
+        if (Number.isNaN(idx) || !methods[idx]) return;
+        const action = button.dataset.action;
+        if (action === 'remove') {
+            methods.splice(idx, 1);
+        }
+        if (action === 'move-up' && idx > 0) {
+            [methods[idx - 1], methods[idx]] = [methods[idx], methods[idx - 1]];
+        }
+        if (action === 'move-down' && idx < methods.length - 1) {
+            [methods[idx + 1], methods[idx]] = [methods[idx], methods[idx + 1]];
+        }
+        refreshUI();
+    });
+
+    addBtn.addEventListener('click', () => {
+        methods.push(cloneMethod());
+        refreshUI();
+    });
+
+    resetBtn.addEventListener('click', () => {
+        if (!defaults.length) return;
+        methods = defaults.map(cloneMethod);
+        refreshUI();
+        setStatus('Przywrócono niezmienione wartości (zapisz, by opublikować).');
+    });
+
+    async function loadContact() {
+        setStatus('Ładowanie...');
+        try {
+            const data = await api('contact');
+            defaults = normalizeMethods(data.defaults || []);
+            const incoming = Array.isArray(data.methods) && data.methods.length ? data.methods : defaults;
+            methods = normalizeMethods(incoming);
+            refreshUI();
+            setStatus('');
+        } catch (err) {
+            console.error('Nie udało się pobrać metod kontaktu', err);
+            listEl.innerHTML = '<p class="empty-hint">Błąd ładowania danych.</p>';
+            setStatus('Błąd pobierania danych', 'error');
+        }
+    }
+
+    async function saveContact(event) {
+        event.preventDefault();
+        setStatus('Zapisywanie...');
+        saveBtn.disabled = true;
+        addBtn.disabled = true;
+        resetBtn.disabled = true;
+        try {
+            const payload = {
+                methods: methods.map((m) => ({
+                    label: (m.label || '').trim(),
+                    value: (m.value || '').trim(),
+                    href: (m.href || '').trim(),
+                    icon_url: (m.icon_url || '').trim(),
+                })),
+            };
+            const result = await api('contact', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!result.ok) throw new Error('Save failed');
+            methods = normalizeMethods(result.methods || payload.methods);
+            refreshUI();
+            setStatus('Zapisano ✔', 'ok');
+        } catch (err) {
+            console.error('Nie udało się zapisać kontaktu', err);
+            setStatus('Błąd zapisu', 'error');
+        } finally {
+            saveBtn.disabled = false;
+            addBtn.disabled = false;
+            resetBtn.disabled = false;
+        }
+    }
+
+    form.addEventListener('submit', saveContact);
+    loadContact();
+    </script>
+</body>
+</html>

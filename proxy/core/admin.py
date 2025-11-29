@@ -23,6 +23,7 @@ from db import (
     get_all_permissions,
     get_all_roles,
     get_all_users,
+    get_contact_methods,
     get_http_log_status_breakdown,
     get_http_log_summary,
     get_http_log_timeline,
@@ -35,9 +36,11 @@ from db import (
     get_top_http_subdomains,
     get_user_roles,
     get_user_by_id,
+    replace_contact_methods,
     update_role,
     update_table_row,
     update_user,
+    CONTACT_METHOD_DEFAULTS,
     user_is_admin,
 )
 
@@ -276,6 +279,21 @@ def handle_admin_api(
 
         if handler.command == 'GET' and path_only == 'dashboard/metrics':
             return handler.send_json(get_dashboard_metrics())
+
+        if handler.command == 'GET' and path_only == 'contact':
+            return handler.send_json({
+                'methods': get_contact_methods(),
+                'defaults': CONTACT_METHOD_DEFAULTS,
+            })
+
+        if handler.command == 'POST' and path_only == 'contact':
+            data = _read_json_body(handler)
+            methods = data.get('methods') or []
+            saved = replace_contact_methods(methods)
+            if saved is None:
+                log_error('[ADMIN API] Failed to save contact methods')
+                return handler.send_json({'ok': False}, status=500)
+            return handler.send_json({'ok': True, 'methods': saved})
 
         if handler.command == 'GET' and path_only == 'projects/status':
             results = []

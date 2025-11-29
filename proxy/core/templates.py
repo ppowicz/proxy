@@ -24,6 +24,7 @@ ADMIN_PAGE_FILES = {
     "logs": Path(os.getenv("ADMIN_TEMPLATE_LOGS", "/home/ppowicz/proxy/proxy/sites/admin_logs.html")),
     "users": Path(os.getenv("ADMIN_TEMPLATE_USERS", "/home/ppowicz/proxy/proxy/sites/admin_users.html")),
     "roles": Path(os.getenv("ADMIN_TEMPLATE_ROLES", "/home/ppowicz/proxy/proxy/sites/admin_roles.html")),
+    "contact": Path(os.getenv("ADMIN_TEMPLATE_CONTACT", "/home/ppowicz/proxy/proxy/sites/admin_contact.html")),
 }
 
 ADMIN_ROUTE_TO_TEMPLATE = {
@@ -33,6 +34,7 @@ ADMIN_ROUTE_TO_TEMPLATE = {
     "/logs": "logs",
     "/users": "users",
     "/roles": "roles",
+    "/contact": "contact",
 }
 
 
