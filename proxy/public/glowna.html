@@ -38,9 +38,12 @@
             background: radial-gradient(circle at top, #0d0d1c, #030307 70%);
             color: #f5f5f5;
             display: flex;
-            align-items: center;
             justify-content: center;
-            overflow: hidden;
+            align-items: flex-start;
+            padding: 60px 20px;
+            min-height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
         .noise {
             position: fixed;
@@ -55,6 +58,8 @@
             z-index: 1;
             padding: 40px;
             animation: fadeIn 1.4s ease forwards;
+            max-width: 960px;
+            width: 100%;
         }
         .badge {
             display: inline-flex;
@@ -127,11 +132,94 @@
             border-color: rgba(255, 255, 255, 0.7);
             background: rgba(255, 255, 255, 0.05);
         }
+        .projects-section {
+            margin-top: 64px;
+            padding-top: 40px;
+            text-align: left;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .section-kicker {
+            display: inline-block;
+            margin: 0 0 12px;
+            font-size: 12px;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.55);
+        }
+        .projects-section h3 {
+            margin: 0;
+            font-weight: 300;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.85);
+        }
+        .projects-grid {
+            margin-top: 28px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+        }
+        .projects-grid-empty {
+            margin-top: 28px;
+            display: flex;
+            justify-content: center;
+        }
+        .project-card {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 22px;
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            text-decoration: none;
+            color: inherit;
+            letter-spacing: 0.08em;
+            transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+        }
+        .project-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .project-card__domain {
+            font-size: 18px;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+        }
+        .project-card__url {
+            font-size: 12px;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .project-card__meta {
+            margin-top: 16px;
+            font-size: 11px;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .projects-empty {
+            padding: 24px;
+            border-radius: 24px;
+            border: 1px dashed rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.7);
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+        }
         @media (max-width: 520px) {
             .content { padding: 24px; }
             .badge { letter-spacing: 0.2em; }
             .actions {
                 flex-direction: column;
+            }
+            .projects-section {
+                margin-top: 48px;
+                padding-top: 32px;
+            }
+            .projects-grid {
+                grid-template-columns: 1fr;
             }
         }
         @keyframes fadeIn {
@@ -161,6 +249,11 @@
             <a class="btn primary" href="/login">Logowanie</a>
             <a class="btn" href="/kontakt">Kontakt</a>
         </div>
+        <section class="projects-section" aria-labelledby="public-projects-heading">
+            <span class="section-kicker">publiczne projekty</span>
+            <h3 id="public-projects-heading">Dostępne subdomeny</h3>
+            <!--PUBLIC_PROJECTS-->
+        </section>
     </main>
 </body>
 </html>

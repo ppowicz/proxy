@@ -376,12 +376,50 @@ def _build_contact_items_html(methods: Optional[List[Dict[str, str]]]) -> str:
     return "\n".join(fragments)
 
 
+def _build_public_projects_html() -> str:
+    public_projects = sorted(
+        [proj for proj in PROJECTS.values() if getattr(proj, "is_public", False)],
+        key=lambda proj: proj.subdomain,
+    )
+    if not public_projects:
+        return (
+            '<div class="projects-grid projects-grid-empty">'
+            '<div class="projects-empty">Aktualnie brak publicznych projektów.</div>'
+            '</div>'
+        )
+
+    cards: List[str] = []
+    for proj in public_projects:
+        subdomain = html.escape(proj.subdomain)
+        full_domain = f"{proj.subdomain}.{ROOT_DOMAIN}"
+        escaped_domain = html.escape(full_domain)
+        href = html.escape(f"https://{full_domain}", quote=True)
+        cards.append(
+            (
+                '<a class="project-card" href="{href}" target="_blank" rel="noopener noreferrer">'
+                '<span class="project-card__domain">{domain}</span>'
+                '<span class="project-card__url">https://{domain}</span>'
+                '<span class="project-card__meta">Dostęp publiczny</span>'
+                '</a>'
+            ).format(href=href, domain=escaped_domain)
+        )
+
+    return '<div class="projects-grid">' + "".join(cards) + "</div>"
+
+
 def _render_contact_page(html_text: str) -> str:
     items_html = _build_contact_items_html(get_contact_methods())
     placeholder = "<!--CONTACT_ITEMS-->"
     if placeholder in html_text:
         return html_text.replace(placeholder, items_html)
     return html_text.replace("</div>", f"{items_html}</div>", 1)
+
+
+def _render_home_page(html_text: str) -> str:
+    placeholder = "<!--PUBLIC_PROJECTS-->"
+    if placeholder not in html_text:
+        return html_text
+    return html_text.replace(placeholder, _build_public_projects_html(), 1)
 
 
 def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
@@ -399,7 +437,9 @@ def _serve_public_page(handler: 'ProxyHandler', page_key: str) -> None:
         log_error(f"[PUBLIC] Failed to read {page_path}: {exc}")
         handler.send_error_page("500")
         return
-    if page_key == "kontakt":
+    if page_key == "glowna":
+        html = _render_home_page(html)
+    elif page_key == "kontakt":
         html = _render_contact_page(html)
     handler._send_html_response(200, html, is_error=False, allow_index=True)
 
@@ -670,6 +710,7 @@ class ProjectConfig:
     port: int
     password: Optional[str]
     permission: Optional[str]
+    is_public: bool = False
     error: Optional[str] = None
 
 
@@ -730,6 +771,13 @@ def load_projects():
         port_raw = data.get("port")
         password = data.get("password")
         permission = data.get("permission")
+        raw_public = data.get("public", False)
+        if isinstance(raw_public, bool):
+            is_public = raw_public
+        elif isinstance(raw_public, str):
+            is_public = raw_public.strip().lower() in {"1", "true", "yes", "y", "on"}
+        else:
+            is_public = bool(raw_public)
 
         error_msg = None
         if not isinstance(subdomain, str) or not subdomain:
@@ -759,6 +807,7 @@ def load_projects():
             port=port,
             password=password if password not in (None, "") else None,
             permission=permission,
+            is_public=is_public,
             error=None,
         )
         new_projects[subdomain] = proj
