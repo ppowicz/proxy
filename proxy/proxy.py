@@ -5,6 +5,7 @@ import hmac
 import http.client
 import html
 import json
+import logging
 import mimetypes
 import os
 import secrets
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from queue import Empty, Full, Queue
 from socketserver import ThreadingMixIn
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote
@@ -118,6 +120,8 @@ CONTACT_ICON_FALLBACK = os.getenv(
     "CONTACT_ICON_FALLBACK_URL",
     "https://cdn.jsdelivr.net/npm/lucide-static@0.408.0/icons/link.svg",
 )
+HTTP_LOG_QUEUE_SIZE = int(os.getenv("HTTP_LOG_QUEUE_SIZE", "5000"))
+HTTP_LOG_QUEUE_WARN_INTERVAL = int(os.getenv("HTTP_LOG_QUEUE_WARN_INTERVAL_SECONDS", "60"))
 
 PROCESS_START_TIME = time.time()
 LOGGER = get_logger("proxy")
@@ -136,6 +140,23 @@ def log_operational(message: str):
 
 def log_error(message: str, exc_info=False):
     log_event(message, level="error", console=True, exc_info=exc_info)
+
+
+def _refresh_file_handlers():
+    for handler in LOGGER.handlers:
+        if not isinstance(handler, logging.FileHandler):
+            continue
+        handler.acquire()
+        try:
+            stream = getattr(handler, "stream", None)
+            if stream:
+                stream.flush()
+                stream.close()
+            handler.stream = handler._open()
+        except Exception as exc:
+            log_error(f"[LOG] Failed to refresh log handler: {exc}", exc_info=True)
+        finally:
+            handler.release()
 
 
 def _parse_log_timestamp(line: str) -> Optional[datetime]:
@@ -162,6 +183,7 @@ def cleanup_log_file(retention_days: int) -> int:
                     continue
                 dst.write(line)
         temp_path.replace(LOG_FILE_PATH)
+        _refresh_file_handlers()
     except Exception as exc:
         log_error(f"[LOG ROTATE] Failed to cleanup proxy.log: {exc}")
         try:
@@ -349,6 +371,84 @@ class RateLimiter:
 
 
 RATE_LIMITER = RateLimiter()
+
+REQUEST_LOG_QUEUE: Queue = Queue(maxsize=max(1, HTTP_LOG_QUEUE_SIZE))
+LOG_QUEUE_DROPPED = 0
+LOG_QUEUE_LAST_WARN = 0.0
+LOG_WORKER: Optional['RequestLogWorker'] = None
+
+
+class RequestLogWorker(threading.Thread):
+    def __init__(self):
+        super().__init__(name="request-log-worker", daemon=True)
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def run(self):
+        while True:
+            try:
+                record = REQUEST_LOG_QUEUE.get(timeout=1.0)
+            except Empty:
+                if self._stop_event.is_set():
+                    break
+                continue
+
+            if record is None:
+                REQUEST_LOG_QUEUE.task_done()
+                break
+
+            try:
+                insert_http_log(record)
+            except Exception as exc:
+                log_error(f"[LOG] Failed to persist http_log: {exc}", exc_info=True)
+            finally:
+                REQUEST_LOG_QUEUE.task_done()
+
+
+def _enqueue_http_log(record: Dict[str, Any]) -> None:
+    global LOG_QUEUE_DROPPED, LOG_QUEUE_LAST_WARN
+    if not REQUEST_LOG_QUEUE:
+        return
+    try:
+        REQUEST_LOG_QUEUE.put_nowait(record)
+    except Full:
+        LOG_QUEUE_DROPPED += 1
+        now = time.time()
+        if now - LOG_QUEUE_LAST_WARN >= HTTP_LOG_QUEUE_WARN_INTERVAL:
+            log_error(
+                f"[LOG] Request log queue full; dropped {LOG_QUEUE_DROPPED} events in the last window"
+            )
+            LOG_QUEUE_LAST_WARN = now
+
+
+def start_request_log_worker():
+    global LOG_WORKER
+    if LOG_WORKER and LOG_WORKER.is_alive():
+        return
+    LOG_WORKER = RequestLogWorker()
+    LOG_WORKER.start()
+
+
+def stop_request_log_worker(timeout: float = 5.0):
+    global LOG_WORKER
+    worker = LOG_WORKER
+    if not worker:
+        return
+    worker.stop()
+    deadline = time.time() + timeout
+    while True:
+        remaining = max(0.1, deadline - time.time())
+        try:
+            REQUEST_LOG_QUEUE.put(None, timeout=remaining)
+            break
+        except Full:
+            if remaining <= 0:
+                log_error("[LOG] Failed to enqueue shutdown sentinel; queue still full")
+                break
+    worker.join(timeout=timeout)
+    LOG_WORKER = None
 
 
 def _build_contact_items_html(methods: Optional[List[Dict[str, str]]]) -> str:
@@ -1084,11 +1184,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         record.setdefault('response_bytes', 0)
 
-        try:
-            insert_http_log(record)
-            self._log_record_written = True
-        except Exception as log_err:
-            log_error(f"[LOG] Failed to write request log: {log_err}", exc_info=True)
+        _enqueue_http_log(record)
+        self._log_record_written = True
 
     def _log_simple_response(self, status: int, body_length: int = 0, *, is_error: bool = False, error_message: Optional[str] = None):
         self._log_request_event(
@@ -1546,6 +1643,7 @@ def run():
         log_operational("[TLS] ✓ Certificates loaded")
         log_operational(f"[TLS]   - Certificate: {CERT_FILE}")
         log_operational(f"[TLS]   - Key: {KEY_FILE}")
+        start_request_log_worker()
     except Exception as e:
         log_error(f"[TLS] ✗ Failed to setup TLS: {e}", exc_info=True)
         return
@@ -1570,6 +1668,7 @@ def run():
         log_operational("[SHUTDOWN] Closing server...")
         httpd.server_close()
         log_operational("[SHUTDOWN] ✓ Server closed")
+        stop_request_log_worker()
 
 
 if __name__ == "__main__":

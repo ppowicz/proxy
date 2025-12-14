@@ -9,6 +9,7 @@ import base64
 import fnmatch
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -99,6 +100,12 @@ DB_NAME = os.getenv("DB_NAME", "proxy")
 DB_USER = os.getenv("DB_USER", "proxy")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_CONNECT_TIMEOUT_SECONDS = int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "5"))
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "5000"))
+DB_KEEPALIVE_IDLE = int(os.getenv("DB_KEEPALIVE_IDLE_SECONDS", "30"))
+DB_KEEPALIVE_INTERVAL = int(os.getenv("DB_KEEPALIVE_INTERVAL_SECONDS", "10"))
+DB_KEEPALIVE_COUNT = int(os.getenv("DB_KEEPALIVE_COUNT", "5"))
+DB_APPLICATION_NAME = os.getenv("DB_APPLICATION_NAME", "proxy")
 
 PASSWORD_HASHER = PasswordHasher(
     time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
@@ -247,14 +254,28 @@ class DBConnection:
     def get_connection():
         """Get a database connection."""
         try:
-            conn = psycopg2.connect(
-                host=DB_HOST,
-                database=DB_NAME,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                port=DB_PORT,
-                cursor_factory=psycopg2.extras.RealDictCursor
-            )
+            connect_kwargs = {
+                "host": DB_HOST,
+                "database": DB_NAME,
+                "user": DB_USER,
+                "password": DB_PASSWORD,
+                "port": DB_PORT,
+                "cursor_factory": psycopg2.extras.RealDictCursor,
+                "connect_timeout": DB_CONNECT_TIMEOUT_SECONDS,
+                "keepalives": 1,
+                "keepalives_idle": DB_KEEPALIVE_IDLE,
+                "keepalives_interval": DB_KEEPALIVE_INTERVAL,
+                "keepalives_count": DB_KEEPALIVE_COUNT,
+            }
+            options_parts = []
+            if DB_STATEMENT_TIMEOUT_MS > 0:
+                options_parts.append(f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}")
+            if DB_APPLICATION_NAME:
+                options_parts.append(f"-c application_name={DB_APPLICATION_NAME}")
+            if options_parts:
+                connect_kwargs["options"] = " ".join(options_parts)
+
+            conn = psycopg2.connect(**connect_kwargs)
             return conn
         except Exception as e:
             LOGGER.exception(f"[DB ERROR] Failed to connect to database: {e}")
@@ -652,7 +673,8 @@ def insert_http_log(record: Dict) -> bool:
     for k, v in record.items():
         # skip invalid keys
         if not isinstance(k, str) or not k.isidentifier():
-            LOGGER.info(f"[DB LOG] Skipping invalid key: {k}")
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(f"[DB LOG] Skipping invalid key: {k}")
             continue
         cols.append(sql.Identifier(k))
         # JSON-serialize dicts
@@ -661,7 +683,8 @@ def insert_http_log(record: Dict) -> bool:
         else:
             vals.append(v)
     if not cols:
-        LOGGER.info(f"[DB LOG] No valid columns in record")
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug("[DB LOG] No valid columns in record")
         return False
     try:
         with conn:
@@ -669,9 +692,11 @@ def insert_http_log(record: Dict) -> bool:
                 col_names = sql.SQL(', ').join(cols)
                 placeholders = sql.SQL(', ').join(sql.Placeholder() * len(vals))
                 query = sql.SQL('INSERT INTO http_logs ({}) VALUES ({})').format(col_names, placeholders)
-                LOGGER.info(f"[DB LOG] Executing: {query.as_string(cur)}")
+                if LOGGER.isEnabledFor(logging.DEBUG):
+                    LOGGER.debug(f"[DB LOG] Executing: {query.as_string(cur)}")
                 cur.execute(query, vals)
-        LOGGER.info(f"[DB LOG] HTTP log inserted successfully ({len(cols)} columns)")
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug(f"[DB LOG] HTTP log inserted successfully ({len(cols)} columns)")
         return True
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to insert http_log: {e}")
