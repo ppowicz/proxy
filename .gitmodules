@@ -5,3 +5,7 @@
 [submodule "projects/paste"]
 	path = projects/paste
 	url = https://github.com/ppowicz/paste
+
+[submodule "projects/plan"]
+	path = projects/plan
+	url = https://github.com/ppowicz/plan
