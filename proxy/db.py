@@ -10,12 +10,15 @@ import fnmatch
 import hashlib
 import json
 import logging
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 from cryptography.fernet import Fernet, InvalidToken
@@ -170,35 +173,50 @@ def _is_legacy_sha256(hash_value: Optional[str]) -> bool:
 
 
 def _update_user_password_hash(user_id: int, password_hash: str) -> bool:
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE users SET password_hash = %s WHERE id = %s",
-                    (password_hash, user_id)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET password_hash = %s WHERE id = %s",
+                (password_hash, user_id)
+            )
+        conn.commit()
         return True
     except Exception as exc:
         LOGGER.error(f"[DB ERROR] Failed to store password hash for user {user_id}: {exc}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def _mark_successful_login(user_id: int):
-    conn = DBConnection.get_connection()
-    if not conn:
-        return
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE users SET last_login_at = now() WHERE id = %s",
-                    (user_id,)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET last_login_at = now() WHERE id = %s",
+                (user_id,)
+            )
+        conn.commit()
     except Exception:
-        pass
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def _encrypt_totp_secret(secret: str) -> str:
@@ -231,55 +249,158 @@ def _decrypt_totp_secret(user_id: int, secret: Optional[str]) -> Optional[str]:
 
 def _persist_totp_secret(user_id: int, plain_secret: str) -> bool:
     encrypted = _encrypt_totp_secret(plain_secret)
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE users SET totp_secret = %s, totp_setup_at = COALESCE(totp_setup_at, now()), totp_enabled = true WHERE id = %s",
-                    (encrypted, user_id)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET totp_secret = %s, totp_setup_at = COALESCE(totp_setup_at, now()), totp_enabled = true WHERE id = %s",
+                (encrypted, user_id)
+            )
+        conn.commit()
         return True
     except Exception as exc:
         LOGGER.error(f"[DB ERROR] Failed to persist encrypted TOTP secret for user {user_id}: {exc}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 # ====== CONNECTION POOL ======
-class DBConnection:
-    """Thread-safe database connection manager."""
-    
-    @staticmethod
-    def get_connection():
-        """Get a database connection."""
-        try:
-            connect_kwargs = {
-                "host": DB_HOST,
-                "database": DB_NAME,
-                "user": DB_USER,
-                "password": DB_PASSWORD,
-                "port": DB_PORT,
-                "cursor_factory": psycopg2.extras.RealDictCursor,
-                "connect_timeout": DB_CONNECT_TIMEOUT_SECONDS,
-                "keepalives": 1,
-                "keepalives_idle": DB_KEEPALIVE_IDLE,
-                "keepalives_interval": DB_KEEPALIVE_INTERVAL,
-                "keepalives_count": DB_KEEPALIVE_COUNT,
-            }
-            options_parts = []
-            if DB_STATEMENT_TIMEOUT_MS > 0:
-                options_parts.append(f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}")
-            if DB_APPLICATION_NAME:
-                options_parts.append(f"-c application_name={DB_APPLICATION_NAME}")
-            if options_parts:
-                connect_kwargs["options"] = " ".join(options_parts)
 
-            conn = psycopg2.connect(**connect_kwargs)
-            return conn
-        except Exception as e:
-            LOGGER.exception(f"[DB ERROR] Failed to connect to database: {e}")
+# Connection pool configuration
+DB_POOL_MIN_CONN = int(os.getenv("DB_POOL_MIN_CONN", "2"))
+DB_POOL_MAX_CONN = int(os.getenv("DB_POOL_MAX_CONN", "20"))
+
+
+class DBConnection:
+    """Thread-safe database connection pool manager."""
+    
+    _pool = None
+    _pool_lock = threading.Lock()
+    
+    @classmethod
+    def _init_pool(cls):
+        """Initialize the connection pool if not already initialized."""
+        if cls._pool is not None:
+            return
+        
+        with cls._pool_lock:
+            # Double-check after acquiring lock
+            if cls._pool is not None:
+                return
+            
+            try:
+                connect_kwargs = {
+                    "host": DB_HOST,
+                    "database": DB_NAME,
+                    "user": DB_USER,
+                    "password": DB_PASSWORD,
+                    "port": DB_PORT,
+                    "cursor_factory": psycopg2.extras.RealDictCursor,
+                    "connect_timeout": DB_CONNECT_TIMEOUT_SECONDS,
+                    "keepalives": 1,
+                    "keepalives_idle": DB_KEEPALIVE_IDLE,
+                    "keepalives_interval": DB_KEEPALIVE_INTERVAL,
+                    "keepalives_count": DB_KEEPALIVE_COUNT,
+                }
+                options_parts = []
+                if DB_STATEMENT_TIMEOUT_MS > 0:
+                    options_parts.append(f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}")
+                if DB_APPLICATION_NAME:
+                    options_parts.append(f"-c application_name={DB_APPLICATION_NAME}")
+                if options_parts:
+                    connect_kwargs["options"] = " ".join(options_parts)
+                
+                cls._pool = psycopg2.pool.ThreadedConnectionPool(
+                    DB_POOL_MIN_CONN,
+                    DB_POOL_MAX_CONN,
+                    **connect_kwargs
+                )
+                LOGGER.info(f"[DB] Connection pool initialized (min={DB_POOL_MIN_CONN}, max={DB_POOL_MAX_CONN})")
+            except Exception as e:
+                LOGGER.exception(f"[DB ERROR] Failed to initialize connection pool: {e}")
+                cls._pool = None
+    
+    @classmethod
+    def get_connection(cls):
+        """Get a database connection from the pool."""
+        cls._init_pool()
+        if cls._pool is None:
             return None
+        
+        try:
+            conn = cls._pool.getconn()
+            # Validate connection is alive
+            if conn and not cls._is_connection_alive(conn):
+                LOGGER.warning("[DB] Got dead connection from pool, attempting to reconnect")
+                cls._pool.putconn(conn, close=True)
+                conn = cls._pool.getconn()
+            return conn
+        except psycopg2.pool.PoolError as e:
+            LOGGER.error(f"[DB ERROR] Connection pool exhausted: {e}")
+            return None
+        except Exception as e:
+            LOGGER.exception(f"[DB ERROR] Failed to get connection from pool: {e}")
+            return None
+    
+    @classmethod
+    def return_connection(cls, conn, close: bool = False):
+        """Return a connection to the pool."""
+        if conn is None or cls._pool is None:
+            return
+        
+        try:
+            # Rollback any uncommitted transaction before returning
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            cls._pool.putconn(conn, close=close)
+        except Exception as e:
+            LOGGER.error(f"[DB ERROR] Failed to return connection to pool: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+    
+    @classmethod
+    def _is_connection_alive(cls, conn) -> bool:
+        """Check if a connection is still alive."""
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+    
+    @classmethod
+    def close_pool(cls):
+        """Close all connections in the pool."""
+        if cls._pool is not None:
+            try:
+                cls._pool.closeall()
+                LOGGER.info("[DB] Connection pool closed")
+            except Exception as e:
+                LOGGER.error(f"[DB ERROR] Failed to close connection pool: {e}")
+            finally:
+                cls._pool = None
+
+
+@contextmanager
+def get_db_connection():
+    """Context manager for database connections - ensures proper cleanup."""
+    conn = DBConnection.get_connection()
+    try:
+        yield conn
+    finally:
+        DBConnection.return_connection(conn)
 
 # ====== USER MANAGEMENT ======
 
@@ -289,60 +410,77 @@ def hash_password(password: str) -> str:
 
 def create_user(username: str, email: str, password: str) -> Optional[int]:
     """Create new user. Returns user_id on success, None on failure."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                password_hash = hash_password(password)
-                cur.execute(
-                    """
-                    INSERT INTO users (username, email, password_hash, is_active, created_at)
-                    VALUES (%s, %s, %s, false, now())
-                    RETURNING id
-                    """,
-                    (username, email, password_hash)
-                )
-                result = cur.fetchone()
-                return result['id'] if result else None
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            password_hash = hash_password(password)
+            cur.execute(
+                """
+                INSERT INTO users (username, email, password_hash, is_active, created_at)
+                VALUES (%s, %s, %s, false, now())
+                RETURNING id
+                """,
+                (username, email, password_hash)
+            )
+            result = cur.fetchone()
+        conn.commit()
+        return result['id'] if result else None
     except psycopg2.IntegrityError:
         LOGGER.warning(f"[DB] Username or email already exists: {username}, {email}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to create user: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_user_by_username(username: str) -> Optional[Dict]:
     """Get user by username."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM users WHERE username = %s", (username,))
-                return cur.fetchone()
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            return cur.fetchone()
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get user: {e}")
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_user_by_id(user_id: int) -> Optional[Dict]:
     """Get user by ID."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-                return cur.fetchone()
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+            return cur.fetchone()
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get user by ID: {e}")
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def verify_password(username: str, password: str) -> Optional[int]:
     """Verify password for user. Returns user_id on success, None on failure."""
@@ -378,9 +516,7 @@ def verify_password(username: str, password: str) -> Optional[int]:
 def create_session(user_id: int, ip_address: str, user_agent: str, extra_data: Optional[Dict] = None) -> Optional[str]:
     """Create new session. Returns session_id (UUID) on success."""
     session_id = str(uuid4())
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
+    conn = None
     
     # Initialize extra_data with 2FA flags if not provided
     if extra_data is None:
@@ -393,123 +529,156 @@ def create_session(user_id: int, ip_address: str, user_agent: str, extra_data: O
         }
     
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sessions (id, user_id, created_at, last_seen_at, expires_at, ip_address, user_agent, extra_data)
-                    VALUES (%s, %s, now(), now(), now() + interval '7 days', %s, %s, %s)
-                    """,
-                    (session_id, user_id, ip_address, user_agent, psycopg2.extras.Json(extra_data))
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sessions (id, user_id, created_at, last_seen_at, expires_at, ip_address, user_agent, extra_data)
+                VALUES (%s, %s, now(), now(), now() + interval '7 days', %s, %s, %s)
+                """,
+                (session_id, user_id, ip_address, user_agent, psycopg2.extras.Json(extra_data))
+            )
+        conn.commit()
         return session_id
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to create session: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_session(session_id: str) -> Optional[Dict]:
     """Get session by ID. Returns None if expired."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT * FROM sessions 
-                    WHERE id = %s AND expires_at > now()
-                    """,
-                    (session_id,)
-                )
-                return cur.fetchone()
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM sessions 
+                WHERE id = %s AND expires_at > now()
+                """,
+                (session_id,)
+            )
+            return cur.fetchone()
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get session: {e}")
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def update_session_activity(session_id: str) -> bool:
     """Update last_seen_at for session."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE sessions SET last_seen_at = now() WHERE id = %s",
-                    (session_id,)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET last_seen_at = now() WHERE id = %s",
+                (session_id,)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to update session: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def expire_session(session_id: str) -> bool:
     """Expire a session."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE sessions SET expires_at = now() WHERE id = %s",
-                    (session_id,)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET expires_at = now() WHERE id = %s",
+                (session_id,)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to expire session: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 # ====== PERMISSION & ROLE MANAGEMENT ======
 
 def get_user_roles(user_id: int) -> List[Dict]:
     """Get all roles for user."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT r.* FROM roles r
-                    JOIN user_roles ur ON ur.role_id = r.id
-                    WHERE ur.user_id = %s
-                    """,
-                    (user_id,)
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.* FROM roles r
+                JOIN user_roles ur ON ur.role_id = r.id
+                WHERE ur.user_id = %s
+                """,
+                (user_id,)
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get user roles: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_user_permissions(user_id: int) -> List[Dict]:
     """Get all permissions for user (via roles)."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT DISTINCT p.* FROM permissions p
-                    JOIN role_permissions rp ON rp.permission_id = p.id
-                    JOIN user_roles ur ON ur.role_id = rp.role_id
-                    WHERE ur.user_id = %s
-                    """,
-                    (user_id,)
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT p.* FROM permissions p
+                JOIN role_permissions rp ON rp.permission_id = p.id
+                JOIN user_roles ur ON ur.role_id = rp.role_id
+                WHERE ur.user_id = %s
+                """,
+                (user_id,)
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get user permissions: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def user_has_permission(user_id: int, permission_code: str) -> bool:
     """Check if user has specific permission. Admin (*) has all permissions."""
@@ -535,125 +704,157 @@ def user_is_admin(user_id: int) -> bool:
 
 def get_all_users() -> List[Dict]:
     """Get all users (admin only)."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, username, email, is_active, created_at, last_login_at, totp_enabled FROM users")
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, email, is_active, created_at, last_login_at, totp_enabled FROM users")
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get all users: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_all_sessions() -> List[Dict]:
     """Get all active sessions (admin only)."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT s.id, s.user_id, u.username, s.created_at, s.last_seen_at, s.expires_at, s.ip_address, s.user_agent
-                    FROM sessions s
-                    JOIN users u ON u.id = s.user_id
-                    WHERE s.expires_at > now()
-                    ORDER BY s.last_seen_at DESC
-                    """
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.id, s.user_id, u.username, s.created_at, s.last_seen_at, s.expires_at, s.ip_address, s.user_agent
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.expires_at > now()
+                ORDER BY s.last_seen_at DESC
+                """
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get sessions: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_all_roles() -> List[Dict]:
     """Get all roles."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM roles")
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM roles")
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get roles: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_all_permissions() -> List[Dict]:
     """Get all permissions."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM permissions")
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM permissions")
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get permissions: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def assign_role_to_user(user_id: int, role_id: int) -> bool:
     """Assign role to user."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                    (user_id, role_id)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (user_id, role_id)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to assign role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def deassign_role_from_user(user_id: int, role_id: int) -> bool:
     """Remove role from user."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
-    
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM user_roles WHERE user_id = %s AND role_id = %s",
-                    (user_id, role_id)
-                )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM user_roles WHERE user_id = %s AND role_id = %s",
+                (user_id, role_id)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to deassign role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def delete_user(user_id: int) -> bool:
     """Permanently delete a user and their sessions/role links."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
-
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
-                cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
-                cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-                deleted = cur.rowcount or 0
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
+            cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+            cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+            deleted = cur.rowcount or 0
+        conn.commit()
         return bool(deleted)
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to delete user: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 
 # ====== HTTP LOGS & GENERIC TABLE HELPERS ======
@@ -663,10 +864,7 @@ import json
 
 def insert_http_log(record: Dict) -> bool:
     """Insert an http_logs record. `record` is a dict with keys matching columns."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        LOGGER.info(f"[DB LOG] No DB connection available")
-        return False
+    conn = None
     # prepare identifiers and values
     cols = []
     vals = []
@@ -687,42 +885,57 @@ def insert_http_log(record: Dict) -> bool:
             LOGGER.debug("[DB LOG] No valid columns in record")
         return False
     try:
-        with conn:
-            with conn.cursor() as cur:
-                col_names = sql.SQL(', ').join(cols)
-                placeholders = sql.SQL(', ').join(sql.Placeholder() * len(vals))
-                query = sql.SQL('INSERT INTO http_logs ({}) VALUES ({})').format(col_names, placeholders)
-                if LOGGER.isEnabledFor(logging.DEBUG):
-                    LOGGER.debug(f"[DB LOG] Executing: {query.as_string(cur)}")
-                cur.execute(query, vals)
+        conn = DBConnection.get_connection()
+        if not conn:
+            LOGGER.info(f"[DB LOG] No DB connection available")
+            return False
+        
+        with conn.cursor() as cur:
+            col_names = sql.SQL(', ').join(cols)
+            placeholders = sql.SQL(', ').join(sql.Placeholder() * len(vals))
+            query = sql.SQL('INSERT INTO http_logs ({}) VALUES ({})').format(col_names, placeholders)
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(f"[DB LOG] Executing: {query.as_string(cur)}")
+            cur.execute(query, vals)
+        conn.commit()
         if LOGGER.isEnabledFor(logging.DEBUG):
             LOGGER.debug(f"[DB LOG] HTTP log inserted successfully ({len(cols)} columns)")
         return True
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to insert http_log: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_recent_http_logs(limit: int = 200) -> List[Dict]:
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT 
-                        id, created_at, client_ip, method, path, 
-                        subdomain,
-                        response_status, backend_duration_ms, 
-                        auth_username, is_error, error_message
-                    FROM http_logs 
-                    ORDER BY created_at DESC 
-                    LIMIT %s
-                """, (limit,))
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    id, created_at, client_ip, method, path, 
+                    subdomain,
+                    response_status, backend_duration_ms, 
+                    auth_username, is_error, error_message
+                FROM http_logs 
+                ORDER BY created_at DESC 
+                LIMIT %s
+            """, (limit,))
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get http logs: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def cleanup_http_logs_older_than(days: int) -> int:
@@ -730,22 +943,30 @@ def cleanup_http_logs_older_than(days: int) -> int:
     if days <= 0:
         return 0
 
-    conn = DBConnection.get_connection()
-    if not conn:
-        return 0
-
+    conn = None
     removed = 0
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM http_logs WHERE created_at < now() - INTERVAL '1 day' * %s",
-                    (int(days),)
-                )
-                removed = cur.rowcount or 0
+        conn = DBConnection.get_connection()
+        if not conn:
+            return 0
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM http_logs WHERE created_at < now() - INTERVAL '1 day' * %s",
+                (int(days),)
+            )
+            removed = cur.rowcount or 0
+        conn.commit()
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to cleanup http_logs older than {days} days: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return 0
+    finally:
+        DBConnection.return_connection(conn)
 
     return removed
 
@@ -761,79 +982,85 @@ def _sanitize_minutes(minutes: int, default: int = 1440) -> int:
 def get_http_log_summary(minutes: int = 1440) -> Dict:
     """Return aggregate summary metrics for http_logs within the given time window (in minutes)."""
     window_minutes = _sanitize_minutes(minutes)
-    conn = DBConnection.get_connection()
-    if not conn:
-        return {}
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        COUNT(*) AS total_requests,
-                        COUNT(DISTINCT COALESCE(subdomain, '')) AS unique_apps,
-                        COUNT(DISTINCT client_ip) AS unique_clients,
-                        COUNT(DISTINCT auth_username) FILTER (WHERE auth_username IS NOT NULL AND auth_username <> '') AS unique_users,
-                        COALESCE(AVG(backend_duration_ms), 0) AS avg_backend_ms,
-                        SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
-                    FROM http_logs
-                    WHERE created_at >= now() - INTERVAL '1 minute' * %s
-                    """,
-                    (window_minutes,)
-                )
-                row = cur.fetchone() or {}
-                total = row.get('total_requests', 0) or 0
-                errors = row.get('error_count', 0) or 0
-                error_rate = float(errors) / float(total) if total else 0.0
-                return {
-                    'total_requests': total,
-                    'unique_apps': row.get('unique_apps', 0) or 0,
-                    'unique_clients': row.get('unique_clients', 0) or 0,
-                    'unique_users': row.get('unique_users', 0) or 0,
-                    'avg_backend_ms': float(row.get('avg_backend_ms') or 0),
-                    'error_count': errors,
-                    'error_rate': error_rate,
-                    'window_minutes': window_minutes,
-                }
+        conn = DBConnection.get_connection()
+        if not conn:
+            return {}
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_requests,
+                    COUNT(DISTINCT COALESCE(subdomain, '')) AS unique_apps,
+                    COUNT(DISTINCT client_ip) AS unique_clients,
+                    COUNT(DISTINCT auth_username) FILTER (WHERE auth_username IS NOT NULL AND auth_username <> '') AS unique_users,
+                    COALESCE(AVG(backend_duration_ms), 0) AS avg_backend_ms,
+                    SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
+                FROM http_logs
+                WHERE created_at >= now() - INTERVAL '1 minute' * %s
+                """,
+                (window_minutes,)
+            )
+            row = cur.fetchone() or {}
+            total = row.get('total_requests', 0) or 0
+            errors = row.get('error_count', 0) or 0
+            error_rate = float(errors) / float(total) if total else 0.0
+            return {
+                'total_requests': total,
+                'unique_apps': row.get('unique_apps', 0) or 0,
+                'unique_clients': row.get('unique_clients', 0) or 0,
+                'unique_users': row.get('unique_users', 0) or 0,
+                'avg_backend_ms': float(row.get('avg_backend_ms') or 0),
+                'error_count': errors,
+                'error_rate': error_rate,
+                'window_minutes': window_minutes,
+            }
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to compute http_log summary: {e}")
         return {}
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def get_http_log_status_breakdown(minutes: int = 1440) -> Dict:
     """Return counts per status family (2xx/3xx/4xx/5xx) and explicit error count."""
     window_minutes = _sanitize_minutes(minutes)
-    conn = DBConnection.get_connection()
-    if not conn:
-        return {}
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        SUM(CASE WHEN response_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS s2xx,
-                        SUM(CASE WHEN response_status BETWEEN 300 AND 399 THEN 1 ELSE 0 END) AS s3xx,
-                        SUM(CASE WHEN response_status BETWEEN 400 AND 499 THEN 1 ELSE 0 END) AS s4xx,
-                        SUM(CASE WHEN response_status >= 500 THEN 1 ELSE 0 END) AS s5xx,
-                        SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
-                    FROM http_logs
-                    WHERE created_at >= now() - INTERVAL '1 minute' * %s
-                    """,
-                    (window_minutes,)
-                )
-                row = cur.fetchone() or {}
-                return {
-                    's2xx': row.get('s2xx', 0) or 0,
-                    's3xx': row.get('s3xx', 0) or 0,
-                    's4xx': row.get('s4xx', 0) or 0,
-                    's5xx': row.get('s5xx', 0) or 0,
-                    'error_count': row.get('error_count', 0) or 0,
-                    'window_minutes': window_minutes,
-                }
+        conn = DBConnection.get_connection()
+        if not conn:
+            return {}
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN response_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS s2xx,
+                    SUM(CASE WHEN response_status BETWEEN 300 AND 399 THEN 1 ELSE 0 END) AS s3xx,
+                    SUM(CASE WHEN response_status BETWEEN 400 AND 499 THEN 1 ELSE 0 END) AS s4xx,
+                    SUM(CASE WHEN response_status >= 500 THEN 1 ELSE 0 END) AS s5xx,
+                    SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
+                FROM http_logs
+                WHERE created_at >= now() - INTERVAL '1 minute' * %s
+                """,
+                (window_minutes,)
+            )
+            row = cur.fetchone() or {}
+            return {
+                's2xx': row.get('s2xx', 0) or 0,
+                's3xx': row.get('s3xx', 0) or 0,
+                's4xx': row.get('s4xx', 0) or 0,
+                's5xx': row.get('s5xx', 0) or 0,
+                'error_count': row.get('error_count', 0) or 0,
+                'window_minutes': window_minutes,
+            }
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to compute status breakdown: {e}")
         return {}
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def get_http_log_timeline(minutes: int = 1440, bucket_minutes: int = 60, limit_points: int = 200) -> List[Dict]:
@@ -841,144 +1068,156 @@ def get_http_log_timeline(minutes: int = 1440, bucket_minutes: int = 60, limit_p
     window_minutes = _sanitize_minutes(minutes)
     bucket_size = _sanitize_minutes(bucket_minutes, default=5)
     limit_points = max(1, int(limit_points or 1))
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    WITH series AS (
-                        SELECT generate_series(
-                            date_trunc('minute', now() - INTERVAL '1 minute' * %s),
-                            date_trunc('minute', now()),
-                            INTERVAL '1 minute' * %s
-                        ) AS bucket_start
-                    )
-                    SELECT
-                        s.bucket_start,
-                        COUNT(hl.id) AS total,
-                        COALESCE(SUM(CASE WHEN hl.is_error THEN 1 ELSE 0 END), 0) AS errors
-                    FROM series s
-                    LEFT JOIN http_logs hl
-                        ON hl.created_at >= s.bucket_start
-                        AND hl.created_at < s.bucket_start + INTERVAL '1 minute' * %s
-                    GROUP BY s.bucket_start
-                    ORDER BY s.bucket_start DESC
-                    LIMIT %s
-                    """,
-                    (
-                        window_minutes,
-                        bucket_size,
-                        bucket_size,
-                        limit_points,
-                    ),
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH series AS (
+                    SELECT generate_series(
+                        date_trunc('minute', now() - INTERVAL '1 minute' * %s),
+                        date_trunc('minute', now()),
+                        INTERVAL '1 minute' * %s
+                    ) AS bucket_start
                 )
-                rows = cur.fetchall() or []
-                return list(reversed([
-                    {
-                        'bucket_start': row['bucket_start'].isoformat() if row.get('bucket_start') else None,
-                        'total': row.get('total', 0) or 0,
-                        'errors': row.get('errors', 0) or 0,
-                    }
-                    for row in rows
-                ]))
+                SELECT
+                    s.bucket_start,
+                    COUNT(hl.id) AS total,
+                    COALESCE(SUM(CASE WHEN hl.is_error THEN 1 ELSE 0 END), 0) AS errors
+                FROM series s
+                LEFT JOIN http_logs hl
+                    ON hl.created_at >= s.bucket_start
+                    AND hl.created_at < s.bucket_start + INTERVAL '1 minute' * %s
+                GROUP BY s.bucket_start
+                ORDER BY s.bucket_start DESC
+                LIMIT %s
+                """,
+                (
+                    window_minutes,
+                    bucket_size,
+                    bucket_size,
+                    limit_points,
+                ),
+            )
+            rows = cur.fetchall() or []
+            return list(reversed([
+                {
+                    'bucket_start': row['bucket_start'].isoformat() if row.get('bucket_start') else None,
+                    'total': row.get('total', 0) or 0,
+                    'errors': row.get('errors', 0) or 0,
+                }
+                for row in rows
+            ]))
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to compute timeline: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def get_top_http_subdomains(minutes: int = 1440, limit: int = 5) -> List[Dict]:
     window_minutes = _sanitize_minutes(minutes)
     limit = max(1, int(limit or 1))
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        COALESCE(subdomain, '') AS subdomain,
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS errors,
-                        COALESCE(AVG(backend_duration_ms), 0) AS avg_backend_ms
-                    FROM http_logs
-                    WHERE created_at >= now() - INTERVAL '1 minute' * %s
-                    GROUP BY COALESCE(subdomain, '')
-                    ORDER BY total DESC
-                    LIMIT %s
-                    """,
-                    (window_minutes, limit),
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(subdomain, '') AS subdomain,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS errors,
+                    COALESCE(AVG(backend_duration_ms), 0) AS avg_backend_ms
+                FROM http_logs
+                WHERE created_at >= now() - INTERVAL '1 minute' * %s
+                GROUP BY COALESCE(subdomain, '')
+                ORDER BY total DESC
+                LIMIT %s
+                """,
+                (window_minutes, limit),
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to compute top subdomains: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def get_top_http_paths(minutes: int = 1440, limit: int = 5) -> List[Dict]:
     window_minutes = _sanitize_minutes(minutes)
     limit = max(1, int(limit or 1))
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        COALESCE(path, '') AS path,
-                        COALESCE(subdomain, '') AS subdomain,
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS errors
-                    FROM http_logs
-                    WHERE created_at >= now() - INTERVAL '1 minute' * %s
-                    GROUP BY COALESCE(path, ''), COALESCE(subdomain, '')
-                    ORDER BY total DESC
-                    LIMIT %s
-                    """,
-                    (window_minutes, limit),
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(path, '') AS path,
+                    COALESCE(subdomain, '') AS subdomain,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS errors
+                FROM http_logs
+                WHERE created_at >= now() - INTERVAL '1 minute' * %s
+                GROUP BY COALESCE(path, ''), COALESCE(subdomain, '')
+                ORDER BY total DESC
+                LIMIT %s
+                """,
+                (window_minutes, limit),
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to compute top paths: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def get_recent_http_errors(limit: int = 20) -> List[Dict]:
     limit = max(1, int(limit or 1))
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT 
-                        id,
-                        created_at,
-                        subdomain,
-                        path,
-                        method,
-                        response_status,
-                        error_message,
-                        backend_duration_ms
-                    FROM http_logs
-                    WHERE is_error = true OR response_status >= 400
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 
+                    id,
+                    created_at,
+                    subdomain,
+                    path,
+                    method,
+                    response_status,
+                    error_message,
+                    backend_duration_ms
+                FROM http_logs
+                WHERE is_error = true OR response_status >= 400
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to fetch recent errors: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def delete_http_logs(log_ids: List[int]) -> int:
@@ -993,20 +1232,30 @@ def delete_http_logs(log_ids: List[int]) -> int:
             continue
     if not clean_ids:
         return 0
-    conn = DBConnection.get_connection()
-    if not conn:
-        return 0
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM http_logs WHERE id = ANY(%s)",
-                    (clean_ids,)
-                )
-                return cur.rowcount or 0
+        conn = DBConnection.get_connection()
+        if not conn:
+            return 0
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM http_logs WHERE id = ANY(%s)",
+                (clean_ids,)
+            )
+            deleted = cur.rowcount or 0
+        conn.commit()
+        return deleted
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to delete http logs: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return 0
+    finally:
+        DBConnection.return_connection(conn)
 
 
 # ====== CONTACT METHODS ======
@@ -1047,283 +1296,385 @@ def _sanitize_contact_methods(methods: List[Dict[str, str]]) -> List[Dict[str, s
 
 
 def get_contact_methods() -> List[Dict[str, str]]:
-    conn = DBConnection.get_connection()
-    if not conn:
-        return _fallback_contact_methods()
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, label, value, href, icon_url, sort_order
-                    FROM contact_methods
-                    ORDER BY sort_order ASC, id ASC
-                    """
-                )
-                rows = cur.fetchall() or []
-                if not rows:
-                    return _fallback_contact_methods()
-                return rows
+        conn = DBConnection.get_connection()
+        if not conn:
+            return _fallback_contact_methods()
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, label, value, href, icon_url, sort_order
+                FROM contact_methods
+                ORDER BY sort_order ASC, id ASC
+                """
+            )
+            rows = cur.fetchall() or []
+            if not rows:
+                return _fallback_contact_methods()
+            return rows
     except Exception as exc:
         LOGGER.error(f"[DB ERROR] Failed to load contact methods: {exc}")
         return _fallback_contact_methods()
+    finally:
+        DBConnection.return_connection(conn)
 
 
 def replace_contact_methods(methods: List[Dict[str, str]]) -> Optional[List[Dict[str, str]]]:
     sanitized = _sanitize_contact_methods(methods)
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM contact_methods")
-                for idx, item in enumerate(sanitized):
-                    cur.execute(
-                        """
-                        INSERT INTO contact_methods (label, value, href, icon_url, sort_order, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, now())
-                        """,
-                        (
-                            item["label"],
-                            item["value"],
-                            item["href"],
-                            item["icon_url"],
-                            idx,
-                        ),
-                    )
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM contact_methods")
+            for idx, item in enumerate(sanitized):
+                cur.execute(
+                    """
+                    INSERT INTO contact_methods (label, value, href, icon_url, sort_order, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, now())
+                    """,
+                    (
+                        item["label"],
+                        item["value"],
+                        item["href"],
+                        item["icon_url"],
+                        idx,
+                    ),
+                )
+        conn.commit()
         return get_contact_methods()
     except Exception as exc:
         LOGGER.error(f"[DB ERROR] Failed to replace contact methods: {exc}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_table_columns(table: str) -> List[str]:
     """Return list of column names for a table. Sanitize table name."""
     if not isinstance(table, str) or not table.isidentifier():
         return []
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position", (table,))
-                rows = cur.fetchall() or []
-                return [r['column_name'] for r in rows]
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position", (table,))
+            rows = cur.fetchall() or []
+            return [r['column_name'] for r in rows]
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get columns for {table}: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_table_rows(table: str, limit: int = 200) -> List[Dict]:
     if not isinstance(table, str) or not table.isidentifier():
         return []
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                query = sql.SQL('SELECT * FROM {} ORDER BY 1 LIMIT %s').format(sql.Identifier(table))
-                cur.execute(query, (limit,))
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            query = sql.SQL('SELECT * FROM {} ORDER BY 1 LIMIT %s').format(sql.Identifier(table))
+            cur.execute(query, (limit,))
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get rows for {table}: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def update_table_row(table: str, pk_name: str, pk_value, column: str, value) -> bool:
     # basic validation
     if not (isinstance(table, str) and table.isidentifier() and isinstance(column, str) and column.isidentifier() and isinstance(pk_name, str) and pk_name.isidentifier()):
         return False
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                query = sql.SQL('UPDATE {} SET {} = %s WHERE {} = %s').format(
-                    sql.Identifier(table), sql.Identifier(column), sql.Identifier(pk_name)
-                )
-                cur.execute(query, (value, pk_value))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            query = sql.SQL('UPDATE {} SET {} = %s WHERE {} = %s').format(
+                sql.Identifier(table), sql.Identifier(column), sql.Identifier(pk_name)
+            )
+            cur.execute(query, (value, pk_value))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to update {table}.{column}: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 
 # ====== ROLES & PERMISSIONS MANAGEMENT ======
 
 def create_role(name: str, description: str = "") -> Optional[int]:
     """Create new role. Returns role_id on success."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO roles (name, description) VALUES (%s, %s) RETURNING id",
-                    (name, description)
-                )
-                result = cur.fetchone()
-                return result['id'] if result else None
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO roles (name, description) VALUES (%s, %s) RETURNING id",
+                (name, description)
+            )
+            result = cur.fetchone()
+        conn.commit()
+        return result['id'] if result else None
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to create role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def update_role(role_id: int, name: str = None, description: str = None) -> bool:
     """Update role name and/or description."""
     if name is None and description is None:
         return True
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                if name is not None and description is not None:
-                    cur.execute("UPDATE roles SET name = %s, description = %s WHERE id = %s", (name, description, role_id))
-                elif name is not None:
-                    cur.execute("UPDATE roles SET name = %s WHERE id = %s", (name, role_id))
-                elif description is not None:
-                    cur.execute("UPDATE roles SET description = %s WHERE id = %s", (description, role_id))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            if name is not None and description is not None:
+                cur.execute("UPDATE roles SET name = %s, description = %s WHERE id = %s", (name, description, role_id))
+            elif name is not None:
+                cur.execute("UPDATE roles SET name = %s WHERE id = %s", (name, role_id))
+            elif description is not None:
+                cur.execute("UPDATE roles SET description = %s WHERE id = %s", (description, role_id))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to update role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def delete_role(role_id: int) -> bool:
     """Delete role (and deassign all users)."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM user_roles WHERE role_id = %s", (role_id,))
-                cur.execute("DELETE FROM role_permissions WHERE role_id = %s", (role_id,))
-                cur.execute("DELETE FROM roles WHERE id = %s", (role_id,))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_roles WHERE role_id = %s", (role_id,))
+            cur.execute("DELETE FROM role_permissions WHERE role_id = %s", (role_id,))
+            cur.execute("DELETE FROM roles WHERE id = %s", (role_id,))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to delete role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def create_permission(code: str, description: str = "") -> Optional[int]:
     """Create new permission. Returns permission_id on success."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return None
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO permissions (code, description) VALUES (%s, %s) RETURNING id",
-                    (code, description)
-                )
-                result = cur.fetchone()
-                return result['id'] if result else None
+        conn = DBConnection.get_connection()
+        if not conn:
+            return None
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO permissions (code, description) VALUES (%s, %s) RETURNING id",
+                (code, description)
+            )
+            result = cur.fetchone()
+        conn.commit()
+        return result['id'] if result else None
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to create permission: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return None
+    finally:
+        DBConnection.return_connection(conn)
 
 def assign_permission_to_role(role_id: int, permission_id: int) -> bool:
     """Assign permission to role."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                # Check if already exists
-                cur.execute("SELECT 1 FROM role_permissions WHERE role_id = %s AND permission_id = %s", (role_id, permission_id))
-                if cur.fetchone():
-                    return True  # Already assigned
-                cur.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (%s, %s)", (role_id, permission_id))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            # Check if already exists
+            cur.execute("SELECT 1 FROM role_permissions WHERE role_id = %s AND permission_id = %s", (role_id, permission_id))
+            if cur.fetchone():
+                return True  # Already assigned
+            cur.execute("INSERT INTO role_permissions (role_id, permission_id) VALUES (%s, %s)", (role_id, permission_id))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to assign permission to role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def deassign_permission_from_role(role_id: int, permission_id: int) -> bool:
     """Remove permission from role."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM role_permissions WHERE role_id = %s AND permission_id = %s", (role_id, permission_id))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM role_permissions WHERE role_id = %s AND permission_id = %s", (role_id, permission_id))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to deassign permission from role: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_role_permissions(role_id: int) -> List[Dict]:
     """Get all permissions assigned to a role."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return []
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT p.* FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id WHERE rp.role_id = %s",
-                    (role_id,)
-                )
-                return cur.fetchall() or []
+        conn = DBConnection.get_connection()
+        if not conn:
+            return []
+        
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT p.* FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id WHERE rp.role_id = %s",
+                (role_id,)
+            )
+            return cur.fetchall() or []
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to get role permissions: {e}")
         return []
+    finally:
+        DBConnection.return_connection(conn)
 
 def update_user(user_id: int, username: str = None, email: str = None, is_active: bool = None, password: str = None) -> bool:
     """Update user profile."""
     if all(x is None for x in [username, email, is_active, password]):
         return True
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                updates = []
-                params = []
-                if username is not None:
-                    updates.append("username = %s")
-                    params.append(username)
-                if email is not None:
-                    updates.append("email = %s")
-                    params.append(email)
-                if is_active is not None:
-                    updates.append("is_active = %s")
-                    params.append(is_active)
-                if password is not None:
-                    updates.append("password_hash = %s")
-                    params.append(hash_password(password))
-                if updates:
-                    params.append(user_id)
-                    query = "UPDATE users SET " + ", ".join(updates) + " WHERE id = %s"
-                    cur.execute(query, params)
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            updates = []
+            params = []
+            if username is not None:
+                updates.append("username = %s")
+                params.append(username)
+            if email is not None:
+                updates.append("email = %s")
+                params.append(email)
+            if is_active is not None:
+                updates.append("is_active = %s")
+                params.append(is_active)
+            if password is not None:
+                updates.append("password_hash = %s")
+                params.append(hash_password(password))
+            if updates:
+                params.append(user_id)
+                query = "UPDATE users SET " + ", ".join(updates) + " WHERE id = %s"
+                cur.execute(query, params)
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to update user: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def bulk_assign_roles_to_user(user_id: int, role_ids: List[int]) -> bool:
     """Replace all user roles with the provided list."""
-    conn = DBConnection.get_connection()
-    if not conn:
-        return False
+    conn = None
     try:
-        with conn:
-            with conn.cursor() as cur:
-                # Delete existing roles
-                cur.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
-                # Insert new roles
-                for role_id in role_ids:
-                    cur.execute("INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s)", (user_id, role_id))
+        conn = DBConnection.get_connection()
+        if not conn:
+            return False
+        
+        with conn.cursor() as cur:
+            # Delete existing roles
+            cur.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
+            # Insert new roles
+            for role_id in role_ids:
+                cur.execute("INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s)", (user_id, role_id))
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to assign roles to user: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 # ====== TOTP 2FA MANAGEMENT ======
 
@@ -1426,62 +1777,78 @@ def has_totp_enabled(user_id: int) -> bool:
 
 def disable_totp(user_id: int) -> bool:
     """Disable TOTP 2FA for user."""
+    conn = None
     try:
         conn = DBConnection.get_connection()
         if not conn:
             return False
         
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE users 
-                    SET totp_secret = NULL, totp_enabled = false
-                    WHERE id = %s
-                    """,
-                    (user_id,)
-                )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE users 
+                SET totp_secret = NULL, totp_enabled = false
+                WHERE id = %s
+                """,
+                (user_id,)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.error(f"[DB ERROR] Failed to disable TOTP: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def update_session_2fa_state(session_id: str, state_updates: Dict) -> bool:
     """Update session extra_data 2FA state. Example: {'2fa_pending': True, 'original_next': '/path'}"""
+    conn = None
     try:
         conn = DBConnection.get_connection()
         if not conn:
             return False
         
-        with conn:
-            with conn.cursor() as cur:
-                # Get current session
-                cur.execute(
-                    "SELECT extra_data FROM sessions WHERE id = %s AND expires_at > now()",
-                    (session_id,)
-                )
-                result = cur.fetchone()
-                if not result:
-                    LOGGER.error(f"[DB ERROR] Session {session_id} not found or expired")
-                    return False
-                
-                # Get extra_data from dict (psycopg2 auto-decodes JSONB to dict)
-                extra_data = result.get('extra_data', {})
-                if extra_data is None:
-                    extra_data = {}
-                
-                # Update with new state
-                extra_data.update(state_updates)
-                
-                # Save back - use Json wrapper for JSONB type
-                cur.execute(
-                    "UPDATE sessions SET extra_data = %s WHERE id = %s",
-                    (psycopg2.extras.Json(extra_data), session_id)
-                )
+        with conn.cursor() as cur:
+            # Get current session
+            cur.execute(
+                "SELECT extra_data FROM sessions WHERE id = %s AND expires_at > now()",
+                (session_id,)
+            )
+            result = cur.fetchone()
+            if not result:
+                LOGGER.error(f"[DB ERROR] Session {session_id} not found or expired")
+                return False
+            
+            # Get extra_data from dict (psycopg2 auto-decodes JSONB to dict)
+            extra_data = result.get('extra_data', {})
+            if extra_data is None:
+                extra_data = {}
+            
+            # Update with new state
+            extra_data.update(state_updates)
+            
+            # Save back - use Json wrapper for JSONB type
+            cur.execute(
+                "UPDATE sessions SET extra_data = %s WHERE id = %s",
+                (psycopg2.extras.Json(extra_data), session_id)
+            )
+        conn.commit()
         return True
     except Exception as e:
         LOGGER.exception(f"[DB ERROR] Failed to update session 2FA state: {type(e).__name__}: {str(e)}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        DBConnection.return_connection(conn)
 
 def get_session_2fa_state(session_id: str) -> Optional[Dict]:
     """Get session 2FA state from extra_data."""

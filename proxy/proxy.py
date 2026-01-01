@@ -353,9 +353,11 @@ def prepare_body_for_logging(raw_body: bytes, content_type: str) -> Tuple[str, b
 
 
 class RateLimiter:
-    def __init__(self):
+    def __init__(self, cleanup_interval: int = 300):
         self._hits: Dict[str, deque] = defaultdict(deque)
         self._lock = threading.Lock()
+        self._last_cleanup = time.time()
+        self._cleanup_interval = cleanup_interval
 
     def hit(self, bucket: str, key: str, limit: int, window_seconds: int) -> bool:
         if limit <= 0 or window_seconds <= 0:
@@ -363,11 +365,22 @@ class RateLimiter:
         now = time.time()
         composite = f"{bucket}:{key}"
         with self._lock:
+            # Periodic cleanup of empty buckets to prevent memory growth
+            if now - self._last_cleanup > self._cleanup_interval:
+                self._cleanup_empty_buckets()
+                self._last_cleanup = now
+            
             dq = self._hits[composite]
             while dq and dq[0] <= now - window_seconds:
                 dq.popleft()
             dq.append(now)
             return len(dq) <= limit
+
+    def _cleanup_empty_buckets(self):
+        """Remove empty deques to prevent unbounded memory growth."""
+        empty_keys = [k for k, v in self._hits.items() if not v]
+        for k in empty_keys:
+            del self._hits[k]
 
 
 RATE_LIMITER = RateLimiter()
@@ -954,8 +967,39 @@ def maybe_cleanup_logs():
 
 # ====== PROXY SERVER ======
 
+# Thread and connection limits
+MAX_THREADS = int(os.getenv("PROXY_MAX_THREADS", "100"))
+SOCKET_TIMEOUT = int(os.getenv("PROXY_SOCKET_TIMEOUT", "30"))
+
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._thread_semaphore = threading.BoundedSemaphore(MAX_THREADS)
+    
+    def process_request(self, request, client_address):
+        # Set socket timeout to prevent slow clients from blocking threads indefinitely
+        try:
+            request.settimeout(SOCKET_TIMEOUT)
+        except Exception:
+            pass
+        
+        # Use semaphore to limit concurrent threads
+        acquired = self._thread_semaphore.acquire(blocking=False)
+        if not acquired:
+            LOGGER.warning(f"[PROXY] Max threads ({MAX_THREADS}) reached, rejecting connection from {client_address}")
+            try:
+                request.close()
+            except Exception:
+                pass
+            return
+        
+        try:
+            super().process_request(request, client_address)
+        finally:
+            self._thread_semaphore.release()
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -1591,7 +1635,7 @@ def run():
     conn = DBConnection.get_connection()
     if conn:
         log_operational("[DB] ✓ Database connection successful")
-        conn.close()
+        DBConnection.return_connection(conn)
     else:
         log_error("[DB] ✗ Database connection FAILED - check credentials in db.py")
         log_operational("[DB] Continuing anyway, but user authentication will not work")
@@ -1627,6 +1671,7 @@ def run():
 
     # Setup server
     log_operational("[SERVER] Setting up HTTPS proxy...")
+    log_operational(f"[SERVER] Max threads: {MAX_THREADS}, Socket timeout: {SOCKET_TIMEOUT}s")
     server_address = (BIND_HOST, BIND_PORT)
     httpd = ThreadedHTTPServer(server_address, ProxyHandler)
     log_operational(f"[SERVER] ✓ Server created (bind: {BIND_HOST}:{BIND_PORT})")
@@ -1669,6 +1714,13 @@ def run():
         httpd.server_close()
         log_operational("[SHUTDOWN] ✓ Server closed")
         stop_request_log_worker()
+        # Cleanup database connection pool
+        log_operational("[SHUTDOWN] Closing database connection pool...")
+        try:
+            DBConnection.close_pool()
+            log_operational("[SHUTDOWN] ✓ Database pool closed")
+        except Exception as e:
+            log_error(f"[SHUTDOWN] Failed to close database pool: {e}")
 
 
 if __name__ == "__main__":
